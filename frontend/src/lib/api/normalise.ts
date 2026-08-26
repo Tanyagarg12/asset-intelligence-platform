@@ -20,6 +20,7 @@ import type {
   ApiPredictiveWarning,
   ApiStation,
   ApiStationDetail,
+  ApiStationScore,
 } from "./types";
 
 export type DataSource = "api" | "demo";
@@ -277,6 +278,33 @@ export interface StationRow {
   highRiskDocks: number;
   latitude: number | null;
   longitude: number | null;
+  /** From the separate GET /stations/scores call — null until that call is
+   * merged in (see `mergeStationScore`), so the register still renders
+   * without these columns if that fetch fails on its own. */
+  healthClassification: string | null;
+  anomalyScore: number | null;
+  anomalySeverity: string | null;
+  riskScore: number | null;
+  riskCategoryRaw: string | null;
+  priority: string | null;
+  likelyIssue: string | null;
+}
+
+/** Merges a GET /stations/scores row into a station's overview row — kept
+ * separate from `normaliseStation` since the two come from different calls
+ * that can succeed or fail independently. */
+export function mergeStationScore(row: StationRow, score: ApiStationScore | undefined): StationRow {
+  if (!score) return row;
+  return {
+    ...row,
+    healthClassification: score.health_classification,
+    anomalyScore: score.anomaly_score,
+    anomalySeverity: score.anomaly_severity,
+    riskScore: score.risk_score,
+    riskCategoryRaw: score.risk_category,
+    priority: score.priority,
+    likelyIssue: score.likely_issue,
+  };
 }
 
 export interface ChargerRow {
@@ -287,6 +315,17 @@ export interface ChargerRow {
   faulty: boolean;
   /** Null when the charger has never reported. */
   lastSeen: string | null;
+  /** There is no per-charger scoring endpoint — these come from the dock
+   * this charger sits on (see `deriveDockAssetId` in resources.ts), merged
+   * in separately, so null when that cross-reference doesn't resolve. */
+  healthScore: number | null;
+  healthClassification: string | null;
+  anomalyScore: number | null;
+  anomalySeverity: string | null;
+  riskScore: number | null;
+  riskCategoryRaw: string | null;
+  priority: string | null;
+  likelyIssue: string | null;
 }
 
 /** Turns an API dimension key such as `charging_electrical` into a label. */
@@ -345,6 +384,13 @@ export function normaliseStation(row: ApiStation): StationRow {
     highRiskDocks: row.high_risk_docks,
     latitude: row.latitude ?? null,
     longitude: row.longitude ?? null,
+    healthClassification: null,
+    anomalyScore: null,
+    anomalySeverity: null,
+    riskScore: null,
+    riskCategoryRaw: null,
+    priority: null,
+    likelyIssue: null,
   };
 }
 
@@ -356,6 +402,32 @@ export function normaliseCharger(row: ApiCharger): ChargerRow {
     online: row.online,
     faulty: row.faulty,
     lastSeen: row.last_seen ?? null,
+    healthScore: null,
+    healthClassification: null,
+    anomalyScore: null,
+    anomalySeverity: null,
+    riskScore: null,
+    riskCategoryRaw: null,
+    priority: null,
+    likelyIssue: null,
+  };
+}
+
+/** Merges the dock's own AI scoring into a charger row — there is no
+ * per-charger scoring endpoint, so this is the closest real substitute (see
+ * `deriveDockAssetId` in resources.ts for how the dock is found). */
+export function mergeChargerDockRisk(row: ChargerRow, asset: ApiAsset | undefined): ChargerRow {
+  if (!asset) return row;
+  return {
+    ...row,
+    healthScore: asset.health_score,
+    healthClassification: asset.health_classification,
+    anomalyScore: asset.anomaly_score,
+    anomalySeverity: asset.anomaly_severity,
+    riskScore: asset.risk_score,
+    riskCategoryRaw: asset.risk_category,
+    priority: asset.priority,
+    likelyIssue: asset.likely_issue,
   };
 }
 

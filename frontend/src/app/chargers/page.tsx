@@ -25,17 +25,23 @@ export default async function ChargersPage({
       {error || !data ? (
         <ApiErrorState title="Could not load chargers" error={error ?? "Unknown error"} />
       ) : (
-        <Panel
-          action={
-            stationId && (
-              <Link href="/chargers" className="text-[12px] font-medium text-[var(--series-1)] hover:underline">
-                Clear filter (show all)
-              </Link>
-            )
-          }
-        >
-          <ChargersTable rows={data} />
-        </Panel>
+        <div className="flex flex-col gap-2">
+          <Panel
+            action={
+              stationId && (
+                <Link href="/chargers" className="text-[12px] font-medium text-[var(--series-1)] hover:underline">
+                  Clear filter (show all)
+                </Link>
+              )
+            }
+          >
+            <ChargersTable rows={data} />
+          </Panel>
+          <p className="px-1 text-[11.5px] text-text-muted">
+            Condition, Health Score, Anomaly, Risk, Priority and Likely Issue are scored on the dock each
+            charger sits on — this platform has no separate per-charger scoring engine.
+          </p>
+        </div>
       )}
     </PageShell>
   );

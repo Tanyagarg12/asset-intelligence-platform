@@ -22,10 +22,13 @@ import {
   fetchPredictiveWarnings,
   fetchStationDetail,
   fetchStations,
+  fetchStationScores,
   fetchStationsSummary,
 } from "./client";
 import type { ApiBatteryCounts } from "./types";
 import {
+  mergeChargerDockRisk,
+  mergeStationScore,
   normaliseAlert,
   normaliseAsset,
   normaliseAssetTelemetry,
@@ -97,11 +100,19 @@ export interface StationsPageData {
 
 export function getStationsPage(): Promise<Loaded<StationsPageData>> {
   return load(async () => {
-    const [rows, summary] = await Promise.all([
+    // /stations/scores is a second, independent call (Condition/Anomaly/Risk
+    // for every station in one shot) — merged in, but its own failure
+    // shouldn't blank the dock/charger overview from /stations.
+    const [apiRows, summary, scores] = await Promise.all([
       fetchStations(),
       fetchStationsSummary().catch(() => null),
+      fetchStationScores().catch(() => []),
     ]);
-    return { rows: rows.map(normaliseStation), summary };
+    const scoreByStation = new Map(scores.map((s) => [s.station_id.toLowerCase(), s]));
+    const rows = apiRows
+      .map(normaliseStation)
+      .map((row) => mergeStationScore(row, scoreByStation.get(row.stationId.toLowerCase())));
+    return { rows, summary };
   });
 }
 
@@ -142,7 +153,18 @@ export function getStationDetail(stationId: string): Promise<Loaded<StationDetai
 }
 
 export function getChargersPage(): Promise<Loaded<ChargerRow[]>> {
-  return load(async () => (await fetchChargers()).map(normaliseCharger));
+  return load(async () => {
+    // There is no per-charger scoring endpoint — GET /assets (the dock
+    // register) is cross-referenced per charger via `deriveDockAssetId`, a
+    // second independent call so its failure doesn't blank the charger list.
+    const [chargers, assets] = await Promise.all([fetchChargers(), fetchAssets().catch(() => [])]);
+    const assetById = new Map(assets.map((a) => [a.asset_id, a]));
+    return chargers.map((c) => {
+      const row = normaliseCharger(c);
+      const dockAssetId = deriveDockAssetId(row.stationId, row.dockId);
+      return dockAssetId ? mergeChargerDockRisk(row, assetById.get(dockAssetId)) : row;
+    });
+  });
 }
 
 /** There is no per-charger scoring endpoint — a charger's own health/risk

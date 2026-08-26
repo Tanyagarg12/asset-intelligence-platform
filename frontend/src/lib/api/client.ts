@@ -24,6 +24,7 @@ import type {
   ApiRiskSummary,
   ApiStation,
   ApiStationDetail,
+  ApiStationScore,
   ApiStationSummary,
 } from "./types";
 
@@ -160,6 +161,12 @@ export const fetchStationsSummary = cache(
 export const fetchStationDetail = cache(
   (stationId: string): Promise<ApiStationDetail> =>
     getJson<ApiStationDetail>(ENDPOINTS.station(stationId)),
+);
+
+/** One call, AI-scored summary for every station — used to add
+ * Condition/Anomaly/Risk to the station register without an N+1 fetch. */
+export const fetchStationScores = cache(
+  (): Promise<ApiStationScore[]> => getJson<ApiStationScore[]>(ENDPOINTS.stationsScores()),
 );
 
 export const fetchChargers = cache(

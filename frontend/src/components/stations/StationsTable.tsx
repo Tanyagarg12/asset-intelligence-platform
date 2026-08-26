@@ -3,14 +3,44 @@
 import Link from "next/link";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { HealthBar } from "@/components/ui/HealthBar";
-import { StatusDot } from "@/components/ui/StatusDot";
+import { RiskPill } from "@/components/ui/RiskPill";
 import type { StationRow } from "@/lib/api/normalise";
+
+// Same structure as BatteriesTable — Condition/Health Score/Anomaly/Risk/
+// Priority/Likely Issue, sourced from GET /stations/scores.
+const CLASSIFICATION_TONE: Record<string, string> = {
+  HEALTHY: "var(--status-good)",
+  WATCH: "var(--status-warning)",
+  AT_RISK: "var(--status-serious)",
+  CRITICAL: "var(--status-critical)",
+};
+
+function classificationLabel(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const BAND_MEMBERS: Record<string, string[]> = {
+  HEALTHY: ["HEALTHY"],
+  WARNING: ["WATCH", "AT_RISK"],
+  CRITICAL: ["CRITICAL"],
+};
+
+function bandOf(classification: string | null): string | null {
+  if (!classification) return null;
+  const value = classification.toUpperCase();
+  const entry = Object.entries(BAND_MEMBERS).find(([, members]) => members.includes(value));
+  return entry ? entry[0] : null;
+}
 
 export function StationsTable({ rows }: { rows: StationRow[] }) {
   const columns: Column<StationRow>[] = [
     {
       key: "stationId",
       header: "Station ID",
+      headerClassName: "w-[11%]",
       sortValue: (r) => r.stationId,
       render: (r) => (
         <Link
@@ -22,59 +52,19 @@ export function StationsTable({ rows }: { rows: StationRow[] }) {
       ),
     },
     {
-      key: "status",
-      header: "Status",
-      sortValue: (r) => (r.online ? 1 : 0),
-      render: (r) => <StatusDot status={r.online ? "ONLINE" : "OFFLINE"} />,
-    },
-    {
-      key: "docks",
-      header: "Docks",
-      align: "right",
-      sortValue: (r) => r.dockCount,
-      render: (r) => <span className="tabular-nums">{r.dockCount}</span>,
-    },
-    {
-      key: "chargers",
-      header: "Chargers",
-      align: "right",
-      sortValue: (r) => r.chargersOnline,
-      render: (r) => (
-        <span className="tabular-nums">
-          <span className="text-[var(--status-good)]">{r.chargersOnline}</span>
-          <span className="text-text-muted"> / </span>
-          <span className="text-[var(--status-critical)]">{r.chargersOffline}</span>
-        </span>
-      ),
-    },
-    {
-      key: "healthyDocks",
-      header: "Healthy",
-      align: "right",
-      sortValue: (r) => r.healthyDocks,
-      render: (r) => <span className="tabular-nums">{r.healthyDocks}</span>,
-    },
-    {
-      key: "atRiskDocks",
-      header: "At Risk",
-      align: "right",
-      sortValue: (r) => r.atRiskDocks,
+      // From GET /stations/scores, merged in separately — "—" if that call
+      // fails while /stations itself still succeeds.
+      key: "classification",
+      header: "Condition",
+      headerClassName: "w-[11%]",
+      sortValue: (r) => r.healthClassification ?? "",
       render: (r) =>
-        r.atRiskDocks > 0 ? (
-          <span className="font-semibold tabular-nums text-[var(--status-warning)]">{r.atRiskDocks}</span>
-        ) : (
-          <span className="text-text-muted">—</span>
-        ),
-    },
-    {
-      key: "highRiskDocks",
-      header: "High Risk",
-      align: "right",
-      sortValue: (r) => r.highRiskDocks,
-      render: (r) =>
-        r.highRiskDocks > 0 ? (
-          <span className="font-semibold tabular-nums text-[var(--status-critical)]">
-            {r.highRiskDocks}
+        r.healthClassification ? (
+          <span
+            className="font-medium"
+            style={{ color: CLASSIFICATION_TONE[r.healthClassification.toUpperCase()] ?? "var(--text-secondary)" }}
+          >
+            {classificationLabel(r.healthClassification)}
           </span>
         ) : (
           <span className="text-text-muted">—</span>
@@ -82,11 +72,62 @@ export function StationsTable({ rows }: { rows: StationRow[] }) {
     },
     {
       key: "health",
-      header: "Avg Health",
+      header: "Health Score",
+      headerClassName: "w-[15%]",
       sortValue: (r) => r.avgHealthScore,
       render: (r) => <HealthBar score={r.avgHealthScore} />,
     },
+    {
+      key: "anomaly",
+      header: "Anomaly",
+      align: "right",
+      headerClassName: "w-[9%]",
+      sortValue: (r) => r.anomalyScore ?? -1,
+      render: (r) =>
+        r.anomalyScore !== null ? (
+          <span className="tabular-nums" title={r.anomalySeverity ?? undefined}>
+            {Math.round(r.anomalyScore)}
+          </span>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+    {
+      key: "risk",
+      header: "Risk",
+      headerClassName: "w-[11%]",
+      sortValue: (r) => r.riskScore ?? -1,
+      render: (r) =>
+        r.riskScore !== null && r.riskCategoryRaw ? (
+          <RiskPill percent={r.riskScore} category={r.riskCategoryRaw} />
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+    {
+      key: "priority",
+      header: "Priority",
+      headerClassName: "w-[9%]",
+      sortValue: (r) => r.priority ?? "",
+      render: (r) => <span className="tabular-nums text-text-secondary">{r.priority ?? "—"}</span>,
+    },
+    {
+      key: "issue",
+      header: "Likely Issue",
+      headerClassName: "w-[34%]",
+      sortValue: (r) => r.likelyIssue ?? "",
+      render: (r) =>
+        r.likelyIssue ? (
+          <span className="block max-w-[280px] truncate" title={r.likelyIssue}>
+            {r.likelyIssue}
+          </span>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
   ];
+
+  const countOf = (band: string) => rows.filter((r) => bandOf(r.healthClassification) === band).length;
 
   return (
     <DataTable
@@ -94,16 +135,18 @@ export function StationsTable({ rows }: { rows: StationRow[] }) {
       columns={columns}
       rowKey={(r) => r.stationId}
       rowHref={(r) => `/stations/${r.stationId}`}
-      searchFields={(r) => [r.stationId, r.name]}
-      searchPlaceholder="Search station…"
+      searchFields={(r) => [r.stationId, r.name, r.likelyIssue ?? "", r.riskCategoryRaw ?? "", r.priority ?? ""]}
+      searchPlaceholder="Search station, issue or priority…"
       filters={{
         options: [
-          { value: "online", label: "Online", count: rows.filter((r) => r.online).length },
-          { value: "offline", label: "Offline", count: rows.filter((r) => !r.online).length },
+          { value: "HEALTHY", label: "Healthy", count: countOf("HEALTHY") },
+          { value: "WARNING", label: "Warning", count: countOf("WARNING") },
+          { value: "CRITICAL", label: "Critical", count: countOf("CRITICAL") },
         ],
-        predicate: (r, value) => (value === "online" ? r.online : !r.online),
+        predicate: (r, value) => bandOf(r.healthClassification) === value,
       }}
-      initialSort={{ key: "highRiskDocks", direction: "desc" }}
+      initialSort={{ key: "risk", direction: "desc" }}
+      pageSize={15}
     />
   );
 }

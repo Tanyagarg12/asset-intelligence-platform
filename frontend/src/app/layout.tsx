@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Sidebar } from "@/components/layout/Sidebar";
-import { CircumcircleLogo, CircumcircleWordmark } from "@/components/layout/CircumcircleLogo";
 import { CopilotWidget } from "@/components/copilot/CopilotWidget";
 import { getHeaderContext } from "@/lib/api/resources";
 import "./globals.css";
@@ -59,8 +59,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
                 Powered by
               </span>
-              <CircumcircleLogo size={22} />
-              <CircumcircleWordmark />
+              <Image
+                src="/circumcircle-logo.png"
+                alt="Circumcircle Innovations"
+                width={312}
+                height={107}
+                className="h-7 w-auto max-w-[160px]"
+              />
             </div>
           </footer>
         </main>

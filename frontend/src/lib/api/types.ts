@@ -171,6 +171,24 @@ export interface ApiStation {
 /** GET /stations/summary */
 export type ApiStationSummary = ApiStationCounts;
 
+/** One row of GET /stations/scores — the AI-scored summary for every
+ * station in one call (health/anomaly/risk/priority/likely issue), separate
+ * from the dock/charger overview GET /stations returns. */
+export interface ApiStationScore {
+  station_id: string;
+  location: string;
+  health_score: number;
+  health_classification: string;
+  anomaly_score: number;
+  anomaly_severity: string;
+  risk_score: number;
+  risk_category: string;
+  priority: string;
+  likely_issue: string;
+  prediction_window: string;
+  scored_at: string;
+}
+
 /** GET /stations/{id} — the same AI-scoring shape as a battery's detail:
  * dimension scores, detected signals, and a recommended field action. */
 export interface ApiStationDetail {

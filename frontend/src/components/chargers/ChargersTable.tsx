@@ -2,25 +2,46 @@
 
 import Link from "next/link";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { StatusDot } from "@/components/ui/StatusDot";
+import { HealthBar } from "@/components/ui/HealthBar";
+import { RiskPill } from "@/components/ui/RiskPill";
 import type { ChargerRow } from "@/lib/api/normalise";
 
-/** `last_seen` is null for chargers that have never reported. */
-function lastSeenLabel(value: string | null): string {
-  if (!value) return "Never";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime()) || parsed.getTime() === 0) return "Never";
-  return parsed.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+// Same structure as BatteriesTable — Condition/Health Score/Anomaly/Risk/
+// Priority/Likely Issue. There is no per-charger scoring endpoint, so these
+// are the AI scores of the dock each charger sits on (see resources.ts's
+// `deriveDockAssetId`), not the charger itself.
+const CLASSIFICATION_TONE: Record<string, string> = {
+  HEALTHY: "var(--status-good)",
+  WATCH: "var(--status-warning)",
+  AT_RISK: "var(--status-serious)",
+  CRITICAL: "var(--status-critical)",
+};
+
+function classificationLabel(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const BAND_MEMBERS: Record<string, string[]> = {
+  HEALTHY: ["HEALTHY"],
+  WARNING: ["WATCH", "AT_RISK"],
+  CRITICAL: ["CRITICAL"],
+};
+
+function bandOf(classification: string | null): string | null {
+  if (!classification) return null;
+  const value = classification.toUpperCase();
+  const entry = Object.entries(BAND_MEMBERS).find(([, members]) => members.includes(value));
+  return entry ? entry[0] : null;
 }
 
 export function ChargersTable({ rows }: { rows: ChargerRow[] }) {
-  // Explicit column widths keep Faulty and Last Seen adjacent instead of the
-  // browser spreading six sparse columns across the full panel width.
   const columns: Column<ChargerRow>[] = [
     {
       key: "chargerId",
       header: "Charger ID",
-      headerClassName: "w-[20%]",
       sortValue: (r) => r.chargerId,
       render: (r) => (
         <Link
@@ -32,72 +53,96 @@ export function ChargersTable({ rows }: { rows: ChargerRow[] }) {
       ),
     },
     {
-      key: "dockId",
-      header: "Dock",
-      headerClassName: "w-[12%]",
-      sortValue: (r) => r.dockId,
-      render: (r) => r.dockId,
-    },
-    {
-      key: "station",
-      header: "Station",
-      headerClassName: "w-[22%]",
-      sortValue: (r) => r.stationId,
-      render: (r) => (
-        <Link href={`/stations/${r.stationId}`} className="text-[var(--series-1)] hover:underline">
-          {r.stationId}
-        </Link>
-      ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      headerClassName: "w-[14%]",
-      sortValue: (r) => (r.online ? 1 : 0),
-      render: (r) => <StatusDot status={r.online ? "ONLINE" : "OFFLINE"} />,
-    },
-    {
-      key: "faulty",
-      header: "Faulty",
-      headerClassName: "w-[12%]",
-      sortValue: (r) => (r.faulty ? 1 : 0),
+      key: "classification",
+      header: "Condition",
+      sortValue: (r) => r.healthClassification ?? "",
       render: (r) =>
-        r.faulty ? (
-          <span className="font-semibold text-[var(--status-critical)]">Yes</span>
+        r.healthClassification ? (
+          <span
+            className="font-medium"
+            style={{ color: CLASSIFICATION_TONE[r.healthClassification.toUpperCase()] ?? "var(--text-secondary)" }}
+          >
+            {classificationLabel(r.healthClassification)}
+          </span>
         ) : (
-          <span className="text-text-muted">No</span>
+          <span className="text-text-muted">—</span>
         ),
     },
     {
-      key: "lastSeen",
-      header: "Last Seen",
+      key: "health",
+      header: "Health Score",
+      sortValue: (r) => r.healthScore ?? -1,
+      render: (r) => (r.healthScore !== null ? <HealthBar score={r.healthScore} /> : <span className="text-text-muted">—</span>),
+    },
+    {
+      key: "anomaly",
+      header: "Anomaly",
       align: "right",
-      headerClassName: "w-[20%]",
-      sortValue: (r) => (r.lastSeen ? new Date(r.lastSeen).getTime() : 0),
-      render: (r) => <span className="whitespace-nowrap tabular-nums">{lastSeenLabel(r.lastSeen)}</span>,
+      sortValue: (r) => r.anomalyScore ?? -1,
+      render: (r) =>
+        r.anomalyScore !== null ? (
+          <span className="tabular-nums" title={r.anomalySeverity ?? undefined}>
+            {Math.round(r.anomalyScore)}
+          </span>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+    {
+      key: "risk",
+      header: "Risk",
+      sortValue: (r) => r.riskScore ?? -1,
+      render: (r) =>
+        r.riskScore !== null && r.riskCategoryRaw ? (
+          <RiskPill percent={r.riskScore} category={r.riskCategoryRaw} />
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
+    },
+    {
+      key: "priority",
+      header: "Priority",
+      sortValue: (r) => r.priority ?? "",
+      render: (r) => <span className="tabular-nums text-text-secondary">{r.priority ?? "—"}</span>,
+    },
+    {
+      key: "issue",
+      header: "Likely Issue",
+      sortValue: (r) => r.likelyIssue ?? "",
+      render: (r) =>
+        r.likelyIssue ? (
+          <span className="block max-w-[280px] truncate" title={r.likelyIssue}>
+            {r.likelyIssue}
+          </span>
+        ) : (
+          <span className="text-text-muted">—</span>
+        ),
     },
   ];
+
+  const countOf = (band: string) => rows.filter((r) => bandOf(r.healthClassification) === band).length;
 
   return (
     <DataTable
       rows={rows}
       columns={columns}
-      // charger_id repeats across stations, so the station id disambiguates
-      // which charger the row means.
+      // charger_id repeats across stations, so the station id (not shown as
+      // its own column here, mirroring the battery table) still disambiguates
+      // the row identity and its link.
       rowKey={(r) => `${r.stationId}-${r.chargerId}`}
       rowHref={(r) => `/chargers/${r.chargerId}?station=${r.stationId}`}
-      searchFields={(r) => [r.chargerId, r.dockId, r.stationId]}
-      searchPlaceholder="Search charger, dock or station…"
+      searchFields={(r) => [r.chargerId, r.stationId, r.dockId, r.likelyIssue ?? "", r.riskCategoryRaw ?? "", r.priority ?? ""]}
+      searchPlaceholder="Search charger, issue or priority…"
       filters={{
         options: [
-          { value: "online", label: "Online", count: rows.filter((r) => r.online).length },
-          { value: "offline", label: "Offline", count: rows.filter((r) => !r.online).length },
-          { value: "faulty", label: "Faulty", count: rows.filter((r) => r.faulty).length },
+          { value: "HEALTHY", label: "Healthy", count: countOf("HEALTHY") },
+          { value: "WARNING", label: "Warning", count: countOf("WARNING") },
+          { value: "CRITICAL", label: "Critical", count: countOf("CRITICAL") },
         ],
-        predicate: (r, value) =>
-          value === "faulty" ? r.faulty : value === "online" ? r.online : !r.online,
+        predicate: (r, value) => bandOf(r.healthClassification) === value,
       }}
-      initialSort={{ key: "faulty", direction: "desc" }}
+      initialSort={{ key: "risk", direction: "desc" }}
+      pageSize={15}
     />
   );
 }

@@ -45,6 +45,7 @@ export const ENDPOINTS = {
   // --- Stations & chargers ---
   stations: () => "/stations",
   stationsSummary: () => "/stations/summary",
+  stationsScores: () => "/stations/scores",
   station: (stationId: string) => `/stations/${id(stationId)}`,
   chargers: () => "/chargers",
   chargersSummary: () => "/chargers/summary",
