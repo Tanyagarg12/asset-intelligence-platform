@@ -1,7 +1,7 @@
 "use client";
 
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { TelemetryPoint } from "@/lib/mock";
+import type { AssetTelemetryPointView } from "@/lib/api/normalise";
 
 export function TelemetryChart({
   data,
@@ -10,8 +10,8 @@ export function TelemetryChart({
   unit,
   gradientId,
 }: {
-  data: TelemetryPoint[];
-  dataKey: keyof TelemetryPoint;
+  data: AssetTelemetryPointView[];
+  dataKey: keyof AssetTelemetryPointView;
   color: string;
   unit: string;
   gradientId: string;
@@ -28,7 +28,7 @@ export function TelemetryChart({
           </defs>
           <CartesianGrid stroke="var(--gridline)" vertical={false} />
           <XAxis
-            dataKey="timestamp"
+            dataKey="date"
             tickFormatter={(iso: string) =>
               new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })
             }

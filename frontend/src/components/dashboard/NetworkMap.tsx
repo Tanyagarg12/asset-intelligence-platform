@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { CITIES, type Station } from "@/lib/mock";
 import {
   INDIA_COS_MID,
   INDIA_MAX_LAT,
@@ -10,6 +9,23 @@ import {
   INDIA_VIEW_W,
 } from "./indiaOutline";
 
+export interface MapMarker {
+  stationId: string;
+  label: string;
+  lat: number;
+  lng: number;
+  online: boolean;
+  atRisk: number;
+  avgHealthScore: number;
+}
+
+export interface MapCityLabel {
+  name: string;
+  lat: number;
+  lng: number;
+  side?: "above" | "left" | "right";
+}
+
 /** Same projection the outline was generated with, expressed as a percentage
  * of the container, so HTML markers land exactly on the SVG boundary. */
 function project(lat: number, lng: number): { x: number; y: number } {
@@ -18,46 +34,27 @@ function project(lat: number, lng: number): { x: number; y: number } {
   return { x: Math.min(99, Math.max(1, x)), y: Math.min(99, Math.max(1, y)) };
 }
 
-/** Label placement per city, so neighbouring metros (Mumbai/Pune,
- * Bengaluru/Chennai) don't overlap each other or their marker clusters. */
-const LABEL_SIDE: Record<string, "above" | "left" | "right"> = {
-  Delhi: "above",
-  Ahmedabad: "left",
-  Kolkata: "right",
-  Mumbai: "left",
-  Pune: "right",
-  Hyderabad: "right",
-  Bengaluru: "left",
-  Chennai: "right",
-};
-
 const LABEL_STYLE: Record<"above" | "left" | "right", React.CSSProperties> = {
   above: { transform: "translate(-50%, -100%)", marginTop: "-3.4%" },
   left: { transform: "translate(-100%, -50%)", marginLeft: "-3.6%" },
   right: { transform: "translate(0, -50%)", marginLeft: "3.6%" },
 };
 
-function markerColor(station: Station, atRisk: number): string {
-  if (station.status === "OFFLINE") return "var(--text-muted)";
-  if (atRisk >= 3) return "var(--status-critical)";
-  if (atRisk >= 1) return "var(--status-warning)";
+function markerColor(marker: MapMarker): string {
+  if (!marker.online) return "var(--text-muted)";
+  if (marker.atRisk >= 3) return "var(--status-critical)";
+  if (marker.atRisk >= 1) return "var(--status-warning)";
   return "var(--status-good)";
 }
 
 export const MAP_LEGEND = [
   { label: "Healthy", color: "var(--status-good)" },
-  { label: "1-2 at-risk packs", color: "var(--status-warning)" },
-  { label: "3+ at-risk packs", color: "var(--status-critical)" },
+  { label: "1-2 at-risk docks", color: "var(--status-warning)" },
+  { label: "3+ at-risk docks", color: "var(--status-critical)" },
   { label: "Station offline", color: "var(--text-muted)" },
 ];
 
-export function NetworkMap({
-  stations,
-  atRiskByStation,
-}: {
-  stations: Station[];
-  atRiskByStation: Map<string, number>;
-}) {
+export function NetworkMap({ stations, cityLabels }: { stations: MapMarker[]; cityLabels: MapCityLabel[] }) {
   return (
     <div
       className="relative mx-auto w-full max-w-[520px] overflow-hidden rounded-lg"
@@ -79,15 +76,14 @@ export function NetworkMap({
         />
       </svg>
 
-      {stations.map((station) => {
-        const { x, y } = project(station.lat, station.lng);
-        const atRisk = atRiskByStation.get(station.stationId) ?? 0;
-        const color = markerColor(station, atRisk);
+      {stations.map((marker) => {
+        const { x, y } = project(marker.lat, marker.lng);
+        const color = markerColor(marker);
         return (
           <Link
-            key={station.stationId}
-            href={`/stations/${station.stationId}`}
-            title={`${station.stationId} · ${station.city} · ${station.status === "OFFLINE" ? "Offline" : `${atRisk} at-risk pack(s)`} · avg health ${station.healthScore}`}
+            key={marker.stationId}
+            href={`/stations/${marker.stationId}`}
+            title={`${marker.stationId} · ${marker.label} · ${!marker.online ? "Offline" : `${marker.atRisk} at-risk dock(s)`} · avg health ${marker.avgHealthScore}`}
             className="absolute -translate-x-1/2 -translate-y-1/2"
             style={{ left: `${x}%`, top: `${y}%` }}
           >
@@ -101,9 +97,9 @@ export function NetworkMap({
 
       {/* Labels render above the marker clusters, with a halo so they stay
           legible over dense dots. */}
-      {CITIES.map((city) => {
+      {cityLabels.map((city) => {
         const { x, y } = project(city.lat, city.lng);
-        const side = LABEL_SIDE[city.name] ?? "above";
+        const side = city.side ?? "above";
         return (
           <span
             key={city.name}

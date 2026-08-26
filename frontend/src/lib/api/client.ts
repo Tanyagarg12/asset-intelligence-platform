@@ -5,6 +5,8 @@
 import { cache } from "react";
 import { ENDPOINTS } from "./endpoints";
 import type {
+  ApiAlert,
+  ApiAssetTelemetryPoint,
   ApiBattery,
   ApiBatteryDetail,
   ApiBatterySummary,
@@ -17,8 +19,11 @@ import type {
   ApiDemoScenario,
   ApiHealthDistribution,
   ApiHealthTrendPoint,
+  ApiOperationsRiskItem,
+  ApiPredictiveWarning,
   ApiRiskSummary,
   ApiStation,
+  ApiStationDetail,
   ApiStationSummary,
 } from "./types";
 
@@ -152,6 +157,11 @@ export const fetchStationsSummary = cache(
     getJson<ApiStationSummary>(ENDPOINTS.stationsSummary()),
 );
 
+export const fetchStationDetail = cache(
+  (stationId: string): Promise<ApiStationDetail> =>
+    getJson<ApiStationDetail>(ENDPOINTS.station(stationId)),
+);
+
 export const fetchChargers = cache(
   (): Promise<ApiCharger[]> =>
     getJson<ApiCharger[]>(ENDPOINTS.chargers()),
@@ -170,6 +180,31 @@ export const fetchRiskSummary = cache(
 export const fetchBatteryHealthTrend = cache(
   (days = 7): Promise<ApiHealthTrendPoint[]> =>
     getJson<ApiHealthTrendPoint[]>(ENDPOINTS.batteryHealthTrend(days)),
+);
+
+export const fetchOperationsAlerts = cache(
+  (limit?: number): Promise<ApiAlert[]> => getJson<ApiAlert[]>(ENDPOINTS.operationsAlerts(limit)),
+);
+
+/** Spans every asset type (BATTERY/STATION/DOCK/CHARGER) — the real
+ * predictive-risk register, ~4,000 rows unfiltered on this fleet. */
+export const fetchPredictiveWarnings = cache(
+  (p: { assetType?: string; minCategory?: string } = {}): Promise<ApiPredictiveWarning[]> =>
+    getJson<ApiPredictiveWarning[]>(ENDPOINTS.operationsPredictiveWarnings(p)),
+);
+
+/** Daily dock-level telemetry — the only telemetry-history endpoint this
+ * platform exposes (no per-battery or per-charger equivalent). */
+export const fetchAssetTelemetry = cache(
+  (assetId: string, days = 14): Promise<ApiAssetTelemetryPoint[]> =>
+    getJson<ApiAssetTelemetryPoint[]>(ENDPOINTS.assetTelemetry(assetId, days)),
+);
+
+/** Dock/charger risk list — carries `business_impact` and `scored_at`, which
+ * GET /operations/predictive-warnings and GET /assets don't. */
+export const fetchOperationsRisk = cache(
+  (sortBy = "risk", order: "asc" | "desc" = "desc"): Promise<ApiOperationsRiskItem[]> =>
+    getJson<ApiOperationsRiskItem[]>(ENDPOINTS.operationsRisk(sortBy, order)),
 );
 
 // --- Demo controls -------------------------------------------------------

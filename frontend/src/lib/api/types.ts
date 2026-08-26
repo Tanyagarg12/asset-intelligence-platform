@@ -171,6 +171,29 @@ export interface ApiStation {
 /** GET /stations/summary */
 export type ApiStationSummary = ApiStationCounts;
 
+/** GET /stations/{id} — the same AI-scoring shape as a battery's detail:
+ * dimension scores, detected signals, and a recommended field action. */
+export interface ApiStationDetail {
+  station_id: string;
+  location: string;
+  health_score: number;
+  health_classification: string;
+  anomaly_score: number;
+  anomaly_severity: string;
+  risk_score: number;
+  risk_category: string;
+  priority: string;
+  likely_issue: string;
+  prediction_window: string;
+  scored_at: string;
+  dimension_scores: Record<string, number>;
+  detected_signals: string[];
+  sla: string;
+  business_impact: string;
+  suggested_checks: string[];
+  risk_note: string;
+}
+
 export interface ApiCharger {
   charger_id: string;
   dock_id: string;
@@ -211,6 +234,55 @@ export interface ApiAsset {
   priority: string;
   likely_issue: string;
   prediction_window: string;
+}
+
+// ---------------------------------------------------------------------------
+// GET /operations/predictive-warnings · GET /operations/alerts ·
+// GET /operations/risk · GET /assets/{id}/telemetry
+// ---------------------------------------------------------------------------
+
+/** One row of GET /operations/risk — docks and chargers again (asset_id
+ * looks like "QIS-018-03"), but unlike /operations/predictive-warnings this
+ * one carries `business_impact` and `scored_at`. No `sla` field exists here
+ * — that is genuinely not something the platform scores for a dock/charger. */
+export interface ApiOperationsRiskItem {
+  asset_id: string;
+  location: string;
+  risk_score: number;
+  risk_category: string;
+  likely_issue: string;
+  business_impact: string;
+  priority: string;
+  scored_at: string;
+}
+
+/** One row of GET /operations/predictive-warnings — spans every asset type
+ * (BATTERY, STATION, DOCK, CHARGER), so this is the real "predictive risk
+ * register" the AI Predictions screen wants. */
+export interface ApiPredictiveWarning {
+  asset_type: string;
+  asset_id: string;
+  location: string | null;
+  risk_score: number;
+  risk_category: string;
+  priority: string;
+  likely_issue: string;
+  prediction_window: string;
+  scored_at: string;
+}
+
+/** One row of GET /assets/{id}/telemetry — daily aggregates for a dock, the
+ * only telemetry-history endpoint this platform exposes (no per-battery or
+ * per-charger telemetry endpoint exists). */
+export interface ApiAssetTelemetryPoint {
+  date: string;
+  charger_temperature_mean: number;
+  charging_duration_mean: number;
+  output_current_mean: number;
+  efficiency_mean: number;
+  offline_rate: number;
+  swap_success_rate: number;
+  alert_count: number;
 }
 
 export interface ApiDemoResetResult {

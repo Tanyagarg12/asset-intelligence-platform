@@ -8,6 +8,7 @@
 import {
   ApiUnavailableError,
   apiBaseUrl,
+  fetchAssetTelemetry,
   fetchBatteries,
   fetchBattery,
   fetchBatterySummary,
@@ -16,20 +17,33 @@ import {
   fetchCommandCenter,
   fetchDemoDatasets,
   fetchDemoScenarios,
+  fetchOperationsAlerts,
+  fetchOperationsRisk,
+  fetchPredictiveWarnings,
+  fetchStationDetail,
   fetchStations,
   fetchStationsSummary,
 } from "./client";
 import type { ApiBatteryCounts } from "./types";
 import {
-  alertTone,
+  normaliseAlert,
+  normaliseAsset,
+  normaliseAssetTelemetry,
   normaliseBattery,
   normaliseBatteryDetail,
   normaliseCharger,
+  normalisePredictiveWarning,
   normaliseStation,
+  normaliseStationDetail,
+  type AssetRow,
+  type AssetTelemetryPointView,
   type BatteryDetailView,
   type BatteryRow,
   type AlertTone,
   type ChargerRow,
+  type DashboardAlert,
+  type PredictiveWarningRow,
+  type StationDetailView,
   type StationRow,
 } from "./normalise";
 
@@ -94,16 +108,27 @@ export function getStationsPage(): Promise<Loaded<StationsPageData>> {
 export interface StationDetailData {
   station: StationRow;
   chargers: ChargerRow[];
+  /** From GET /stations/{id} — the same AI-scoring detail a battery's page
+   * shows (dimensions, signals, recommended checks). Null only if that call
+   * itself fails; the rest of the page still renders from `station`. */
+  scoring: StationDetailView | null;
 }
 
 /**
- * There is no GET /stations/{id}, so the detail view is assembled from the
- * station list plus the charger list filtered by station — no new endpoint
- * needed. Batteries cannot be listed per station until they carry a station_id.
+ * The dock/charger overview comes from the station list plus the charger
+ * list filtered by station (there's no per-station dock breakdown any other
+ * way); the AI-scoring section comes from the dedicated GET /stations/{id}.
+ * Batteries still can't be listed per station until they carry a station_id.
  */
 export function getStationDetail(stationId: string): Promise<Loaded<StationDetailData>> {
   return load(async () => {
-    const [stations, chargers] = await Promise.all([fetchStations(), fetchChargers().catch(() => [])]);
+    const [stations, chargers, scoring] = await Promise.all([
+      fetchStations(),
+      fetchChargers().catch(() => []),
+      fetchStationDetail(stationId)
+        .then(normaliseStationDetail)
+        .catch(() => null),
+    ]);
     const match = stations.find((s) => s.station_id.toLowerCase() === stationId.toLowerCase());
     if (!match) throw new ApiUnavailableError(`Station ${stationId} was not found`, 404);
     return {
@@ -111,6 +136,7 @@ export function getStationDetail(stationId: string): Promise<Loaded<StationDetai
       chargers: chargers
         .filter((c) => c.station_id.toLowerCase() === stationId.toLowerCase())
         .map(normaliseCharger),
+      scoring,
     };
   });
 }
@@ -119,11 +145,45 @@ export function getChargersPage(): Promise<Loaded<ChargerRow[]>> {
   return load(async () => (await fetchChargers()).map(normaliseCharger));
 }
 
+/** There is no per-charger scoring endpoint — a charger's own health/risk
+ * comes from the dock it sits on, via GET /assets. The two subsystems name
+ * docks differently ("D01" on the charger vs "QIS-001-01" on the asset), so
+ * this reconstructs the asset-style id from the charger's own station+dock
+ * numbers to look it up. */
+export interface DockRiskView {
+  assetId: string;
+  healthScore: number;
+  healthClassification: string;
+  anomalyScore: number;
+  anomalySeverity: string;
+  riskScore: number;
+  riskCategory: string;
+  priority: string;
+  likelyIssue: string;
+  predictionWindow: string;
+  /** From GET /operations/risk, a second cross-reference — null if that call
+   * fails; the rest of dockRisk still renders without it. No `sla` exists for
+   * a dock/charger anywhere in this platform's API. */
+  businessImpact: string | null;
+  scoredAt: string | null;
+}
+
+function deriveDockAssetId(stationId: string, dockId: string): string | null {
+  const stationDigits = stationId.match(/(\d+)/)?.[1];
+  const dockDigits = dockId.match(/(\d+)/)?.[1];
+  if (!stationDigits || !dockDigits) return null;
+  return `QIS-${stationDigits.padStart(3, "0")}-${dockDigits.padStart(2, "0")}`;
+}
+
 export interface ChargerDetailData {
   charger: ChargerRow;
   station: StationRow | null;
-  /** Other chargers at the same station, for context on the charger's page. */
-  siblings: ChargerRow[];
+  /** The dock's own AI scoring, cross-referenced via `deriveDockAssetId` —
+   * null if the derived id has no match (naming assumption didn't hold). */
+  dockRisk: DockRiskView | null;
+  /** Recent daily telemetry for that same dock, when the cross-reference
+   * above resolved. */
+  telemetry: AssetTelemetryPointView[];
 }
 
 /**
@@ -153,18 +213,42 @@ export function getChargerDetail(chargerId: string, stationId?: string): Promise
 
     const charger = normaliseCharger(match);
     const stationMatch = stations.find((s) => s.station_id.toLowerCase() === charger.stationId.toLowerCase());
-    const siblings = chargers
-      .filter(
-        (c) =>
-          c.station_id.toLowerCase() === charger.stationId.toLowerCase() &&
-          c.charger_id.toLowerCase() !== charger.chargerId.toLowerCase(),
-      )
-      .map(normaliseCharger);
+
+    const dockAssetId = deriveDockAssetId(charger.stationId, charger.dockId);
+    let dockRisk: DockRiskView | null = null;
+    let telemetry: AssetTelemetryPointView[] = [];
+    if (dockAssetId) {
+      const [assets, riskItems, telemetryPoints] = await Promise.all([
+        fetchAssets().catch(() => []),
+        fetchOperationsRisk().catch(() => []),
+        fetchAssetTelemetry(dockAssetId, 14).catch(() => []),
+      ]);
+      const asset = assets.find((a) => a.asset_id === dockAssetId);
+      const riskItem = riskItems.find((r) => r.asset_id === dockAssetId);
+      if (asset) {
+        dockRisk = {
+          assetId: asset.asset_id,
+          healthScore: asset.health_score,
+          healthClassification: asset.health_classification,
+          anomalyScore: asset.anomaly_score,
+          anomalySeverity: asset.anomaly_severity,
+          riskScore: asset.risk_score,
+          riskCategory: asset.risk_category,
+          priority: asset.priority,
+          likelyIssue: asset.likely_issue,
+          predictionWindow: asset.prediction_window,
+          businessImpact: riskItem?.business_impact ?? null,
+          scoredAt: riskItem?.scored_at ?? null,
+        };
+      }
+      telemetry = normaliseAssetTelemetry(telemetryPoints);
+    }
 
     return {
       charger,
       station: stationMatch ? normaliseStation(stationMatch) : null,
-      siblings,
+      dockRisk,
+      telemetry,
     };
   });
 }
@@ -177,7 +261,7 @@ export interface HeaderAlert {
   severity: string;
   tone: AlertTone;
   timestamp: string;
-  batteryId: string | null;
+  href: string | null;
 }
 
 export interface HeaderContext {
@@ -215,18 +299,39 @@ export async function getHeaderContext(): Promise<HeaderContext> {
       online: s.online,
     })),
     alertCount: alerts.filter((a) => /CRITICAL|HIGH/i.test(a.severity)).length,
-    alerts: alerts.slice(0, 6).map((a, idx) => ({
-      key: `${a.entity_id}-${a.timestamp}-${idx}`,
-      title: a.description?.trim() || a.category.replace(/[_-]+/g, " "),
-      entityLabel: `${a.entity_type.charAt(0).toUpperCase()}${a.entity_type.slice(1)} ${a.entity_id}`,
-      stationId: a.station_id,
-      severity: a.severity,
-      tone: alertTone(a.severity),
-      timestamp: a.timestamp,
-      batteryId: /^BAT/i.test(a.entity_id) ? a.entity_id : null,
-    })),
+    alerts: alerts.slice(0, 6).map(normaliseAlert),
     dataAsOf: timestamps.length > 0 ? timestamps[timestamps.length - 1] : null,
   };
+}
+
+/** GET /assets — the dock register, fully scored (health/anomaly/risk). */
+export function getAssetsPage(): Promise<Loaded<AssetRow[]>> {
+  return load(async () => (await fetchAssets()).map(normaliseAsset));
+}
+
+/**
+ * GET /operations/predictive-warnings, unfiltered — spans every asset type
+ * (BATTERY/STATION/DOCK/CHARGER), ~4,000 rows on this fleet. This is the
+ * platform's real predictive-risk register, backing the AI Predictions page.
+ */
+export function getPredictiveWarningsPage(): Promise<Loaded<PredictiveWarningRow[]>> {
+  return load(async () => (await fetchPredictiveWarnings()).map(normalisePredictiveWarning));
+}
+
+export type AlertRow = DashboardAlert;
+
+/** GET /operations/alerts — the real alert feed backing the Alerts page. */
+export function getOperationsAlertsPage(limit = 200): Promise<Loaded<AlertRow[]>> {
+  return load(async () => (await fetchOperationsAlerts(limit)).map(normaliseAlert));
+}
+
+/**
+ * GET /assets/{id}/telemetry — daily dock-level aggregates. This is the only
+ * telemetry-history endpoint the platform exposes; there is no per-battery or
+ * per-charger equivalent, so callers resolve to a dock asset id first.
+ */
+export function getAssetTelemetryPoints(assetId: string, days = 14): Promise<Loaded<AssetTelemetryPointView[]>> {
+  return load(async () => normaliseAssetTelemetry(await fetchAssetTelemetry(assetId, days)));
 }
 
 export interface DemoContext {

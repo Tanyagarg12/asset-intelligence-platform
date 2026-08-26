@@ -32,13 +32,9 @@ export function AlertsPanel({ alerts }: { alerts: DashboardAlert[] }) {
       {alerts.map((alert) => {
         const style = TONE_STYLE[alert.tone];
         const Icon = alert.tone === "critical" ? TriangleAlert : AlertTriangle;
-        const batteryId = alert.entityLabel.startsWith("Battery")
-          ? alert.entityLabel.split(":").pop()?.trim()
-          : null;
-
-        // Battery alerts open that pack; everything else opens the full feed,
-        // so no row is a dead end.
-        const href = batteryId ? `/batteries/${batteryId}` : "/alerts";
+        // The affected asset's own page, its station's when the alert only
+        // carries an opaque reference number, or the full feed as a last resort.
+        const href = alert.href ?? "/alerts";
 
         return (
           <li key={alert.key}>

@@ -28,7 +28,8 @@ function severityLabel(severity: string): string {
 
 /**
  * Bell with a preview of the three most recent alerts. Each row opens the
- * Alerts screen (or the specific battery when the alert names one), and a
+ * specific asset the alert names (or its station, when the alert only
+ * carries an opaque reference number rather than a real asset id), and a
  * footer link goes to the full feed.
  */
 export function AlertBell({ count, alerts }: { count: number; alerts: HeaderAlert[] }) {
@@ -88,7 +89,7 @@ export function AlertBell({ count, alerts }: { count: number; alerts: HeaderAler
                 return (
                   <li key={alert.key}>
                     <Link
-                      href={alert.batteryId ? `/batteries/${alert.batteryId}` : "/alerts"}
+                      href={alert.href ?? "/alerts"}
                       onClick={() => setOpen(false)}
                       className="flex items-start gap-2.5 px-4 py-3 hover:bg-[var(--surface-2)]"
                     >

@@ -1,37 +1,79 @@
 import Link from "next/link";
 import { PageShell } from "@/components/layout/PageShell";
 import { Panel } from "@/components/ui/Panel";
-import { MAP_LEGEND, NetworkMap } from "@/components/dashboard/NetworkMap";
-import { getFleet } from "@/lib/mock";
+import { ApiErrorState } from "@/components/ui/ApiErrorState";
+import { MAP_LEGEND, NetworkMap, type MapCityLabel, type MapMarker } from "@/components/dashboard/NetworkMap";
+import { cityCoordFromLocation, jitterCoord } from "@/lib/geo/indiaCities";
+import { getStationsPage } from "@/lib/api/resources";
+import type { StationRow } from "@/lib/api/normalise";
 
-export default function MapViewPage() {
-  const fleet = getFleet();
+function atRiskCount(station: StationRow): number {
+  return station.highRiskDocks + station.criticalDocks + station.atRiskDocks;
+}
 
-  const atRiskByStation = new Map<string, number>();
-  fleet.batteries.forEach((b) => {
-    if (b.risk.category === "High" || b.risk.category === "Critical") {
-      atRiskByStation.set(b.stationId, (atRiskByStation.get(b.stationId) ?? 0) + 1);
-    }
-  });
+/** Every station has a `location` string ("Bengaluru, Karnataka") but no
+ * lat/lng of its own — the platform doesn't expose per-station coordinates
+ * yet, so each station is placed at its city's coordinates (public,
+ * verifiable geography), jittered so stations in the same city don't stack. */
+function resolveMarker(station: StationRow): MapMarker | null {
+  const coord = cityCoordFromLocation(station.name);
+  if (!coord) return null;
+  const jittered = jitterCoord(coord, station.stationId);
+  return {
+    stationId: station.stationId,
+    label: station.name,
+    lat: jittered.lat,
+    lng: jittered.lng,
+    online: station.online,
+    atRisk: atRiskCount(station),
+    avgHealthScore: station.avgHealthScore,
+  };
+}
 
-  const hotspots = [...atRiskByStation.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([stationId, count]) => ({ station: fleet.stationsById.get(stationId)!, count }));
+export default async function MapViewPage() {
+  const { data, error } = await getStationsPage();
+
+  if (error || !data) {
+    return (
+      <PageShell title="Map View" subtitle="Geographic distribution of stations and risk concentration">
+        <ApiErrorState title="Could not load stations" error={error ?? "Unknown error"} />
+      </PageShell>
+    );
+  }
+
+  const stations = data.rows;
+  const markers = stations.map(resolveMarker).filter((m): m is MapMarker => m !== null);
+  const unresolvedCities = [...new Set(stations.filter((s) => !cityCoordFromLocation(s.name)).map((s) => s.name))];
+
+  // One label per city, at the city's own coordinate (not the jittered
+  // per-station one), so the label doesn't drift with whichever station
+  // happens to render last.
+  const cityLabels: MapCityLabel[] = [...new Set(stations.map((s) => s.name.split(",")[0]?.trim()))]
+    .map((city) => {
+      const coord = city ? cityCoordFromLocation(city) : null;
+      return coord ? { name: city!, lat: coord.lat, lng: coord.lng } : null;
+    })
+    .filter((c): c is MapCityLabel => c !== null);
+
+  const hotspots = [...stations]
+    .filter((s) => atRiskCount(s) > 0)
+    .sort((a, b) => atRiskCount(b) - atRiskCount(a))
+    .slice(0, 5);
 
   const byCity = new Map<string, { stations: number; atRisk: number }>();
-  fleet.stations.forEach((s) => {
-    const entry = byCity.get(s.city) ?? { stations: 0, atRisk: 0 };
+  stations.forEach((s) => {
+    const city = s.name.split(",")[0]?.trim() ?? s.name;
+    const entry = byCity.get(city) ?? { stations: 0, atRisk: 0 };
     entry.stations += 1;
-    entry.atRisk += atRiskByStation.get(s.stationId) ?? 0;
-    byCity.set(s.city, entry);
+    entry.atRisk += atRiskCount(s);
+    byCity.set(city, entry);
   });
 
   return (
     <PageShell title="Map View" subtitle="Geographic distribution of stations and risk concentration">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Panel title="Station Network" className="self-start lg:col-span-2">
-          <NetworkMap stations={fleet.stations} atRiskByStation={atRiskByStation} />
+          <NetworkMap stations={markers} cityLabels={cityLabels} />
           <div className="mt-4 flex flex-wrap gap-4">
             {MAP_LEGEND.map((item) => (
               <span key={item.label} className="flex items-center gap-1.5 text-[12px] text-text-secondary">
@@ -41,51 +83,65 @@ export default function MapViewPage() {
             ))}
           </div>
           <p className="mt-3 text-[12px] text-text-muted">
-            Markers are plotted from station coordinates — click a marker to open that station.
+            Stations, health and risk are live. The platform does not yet expose per-station coordinates, so
+            each marker is placed at its city&apos;s location rather than an exact site — click a marker to
+            open that station.
+            {unresolvedCities.length > 0 && (
+              <>
+                {" "}
+                {unresolvedCities.length} station location{unresolvedCities.length === 1 ? "" : "s"} not shown
+                (city not recognised): {unresolvedCities.join(", ")}.
+              </>
+            )}
           </p>
         </Panel>
 
         <div className="flex flex-col gap-4">
-          <Panel title="Risk Hotspots">
+          <Panel title="Risk Hotspots" titleNote="(top 5, for now)">
             <ul className="-my-1 divide-y divide-[var(--border-hairline)]">
-              {hotspots.map(({ station, count }) => (
-                <li key={station.stationId}>
-                  <Link
-                    href={`/stations/${station.stationId}`}
-                    className="flex items-center justify-between gap-3 py-2.5 hover:bg-[var(--surface-2)]"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-medium text-text-primary">
-                        {station.stationId}
-                      </span>
-                      <span className="block truncate text-[12px] text-text-muted">{station.name}</span>
-                    </span>
-                    <span
-                      className="flex-none whitespace-nowrap rounded-md px-2 py-1 text-[12px] font-semibold tabular-nums"
-                      style={{
-                        backgroundColor: count >= 3 ? "var(--status-critical-bg)" : "var(--status-warning-bg)",
-                        color: count >= 3 ? "var(--status-critical)" : "var(--status-warning)",
-                      }}
+              {hotspots.map((station) => {
+                const count = atRiskCount(station);
+                return (
+                  <li key={station.stationId}>
+                    <Link
+                      href={`/stations/${station.stationId}`}
+                      className="flex items-center justify-between gap-3 py-2.5 hover:bg-[var(--surface-2)]"
                     >
-                      {count} at risk
-                    </span>
-                  </Link>
-                </li>
-              ))}
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13px] font-medium text-text-primary">
+                          {station.stationId}
+                        </span>
+                        <span className="block truncate text-[12px] text-text-muted">{station.name}</span>
+                      </span>
+                      <span
+                        className="flex-none whitespace-nowrap rounded-md px-2 py-1 text-[12px] font-semibold tabular-nums"
+                        style={{
+                          backgroundColor: count >= 3 ? "var(--status-critical-bg)" : "var(--status-warning-bg)",
+                          color: count >= 3 ? "var(--status-critical)" : "var(--status-warning)",
+                        }}
+                      >
+                        {count} at risk
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
               {hotspots.length === 0 && <p className="py-4 text-[13px] text-text-muted">No hotspots.</p>}
             </ul>
           </Panel>
 
-          <Panel title="By City">
+          <Panel title="By City" titleNote="(top 5, for now)">
             <ul className="-my-1 divide-y divide-[var(--border-hairline)]">
               {[...byCity.entries()]
                 .sort((a, b) => b[1].atRisk - a[1].atRisk)
-                .map(([city, data]) => (
+                .slice(0, 5)
+                .map(([city, entry]) => (
                   <li key={city} className="flex items-center justify-between gap-3 py-2.5 text-[13px]">
                     <span className="text-text-secondary">{city}</span>
                     <span className="tabular-nums text-text-muted">
-                      {data.stations} stations ·{" "}
-                      <span className="font-semibold text-[var(--status-critical)]">{data.atRisk}</span> at risk
+                      {entry.stations} station{entry.stations === 1 ? "" : "s"} ·{" "}
+                      <span className="font-semibold text-[var(--status-critical)]">{entry.atRisk}</span> at
+                      risk
                     </span>
                   </li>
                 ))}

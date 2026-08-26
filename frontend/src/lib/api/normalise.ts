@@ -8,13 +8,18 @@
 //   - top_at_risk_batteries[].failure_in_hours-> row.failureInHours
 
 import type {
+  ApiAlert,
+  ApiAsset,
+  ApiAssetTelemetryPoint,
   ApiBattery,
   ApiHealthDistribution,
   ApiBatteryDetail,
   ApiCharger,
   ApiCommandCenter,
   ApiHealthTrendPoint,
+  ApiPredictiveWarning,
   ApiStation,
+  ApiStationDetail,
 } from "./types";
 
 export type DataSource = "api" | "demo";
@@ -34,6 +39,9 @@ export interface DashboardAlert {
   key: string;
   title: string;
   entityLabel: string;
+  /** The affected asset's own page, or its station's when the alert only
+   * carries an opaque reference number rather than a real asset id. */
+  href: string | null;
   stationId: string;
   timestamp: string;
   severity: string;
@@ -119,9 +127,53 @@ function alertTitle(category: string, description: string): string {
   return description?.trim() ? description : readable;
 }
 
-function entityLabel(entityType: string, entityId: string): string {
-  const type = entityType ? entityType.charAt(0).toUpperCase() + entityType.slice(1) : "Entity";
-  return `${type} ID: ${entityId}`;
+/** `entity_id` on this platform is not reliably the affected asset's own id —
+ * roughly a quarter of alerts carry a real one (BAT.../QIS.../CHG...), the
+ * rest carry an opaque internal reference like "ALERT0062" that only looks
+ * like an id. This tells the two apart so the UI never presents a made-up
+ * reference number as if it were a battery, station or charger's real id. */
+function realAssetId(entityId: string): boolean {
+  return /^(BAT|QIS|CHG)/i.test(entityId);
+}
+
+function entityLabel(alert: ApiAlert): string {
+  const type = alert.entity_type ? alert.entity_type.charAt(0).toUpperCase() + alert.entity_type.slice(1) : "Entity";
+  if (realAssetId(alert.entity_id)) return `${type} ${alert.entity_id}`;
+  // Not a real per-asset id — station_id is always real, so say that instead
+  // of presenting the opaque reference as if it named the asset.
+  return `${type} at ${alert.station_id}`;
+}
+
+/** Best-effort link from an alert's entity to its detail page. Falls back to
+ * the alert's `station_id` (always a real station) rather than a dead link
+ * when `entity_id` is only an opaque reference number, not a real asset id. */
+function entityHref(alert: ApiAlert): string | null {
+  const id = alert.entity_id;
+  if (/^BAT/i.test(id)) return `/batteries/${id}`;
+  if (/^QIS/i.test(id)) {
+    const digits = id.match(/\d+/)?.[0];
+    if (digits) return `/stations/QIS${digits.padStart(3, "0")}`;
+  }
+  // CHARGER entity_ids need a station to disambiguate (see the charger
+  // detail page), which this shape doesn't carry — and any opaque
+  // "ALERT####" reference isn't navigable at all — so land on the station.
+  if (alert.station_id) return `/stations/${alert.station_id}`;
+  return null;
+}
+
+/** Shared by the command-center's `top_critical_alerts` and the dedicated
+ * GET /operations/alerts feed — both return the same `ApiAlert` shape. */
+export function normaliseAlert(alert: ApiAlert, idx: number): DashboardAlert {
+  return {
+    key: `${alert.entity_id}-${alert.timestamp}-${idx}`,
+    title: alertTitle(alert.category, alert.description),
+    entityLabel: entityLabel(alert),
+    stationId: alert.station_id,
+    timestamp: alert.timestamp,
+    severity: alert.severity,
+    tone: alertTone(alert.severity),
+    href: entityHref(alert),
+  };
 }
 
 function trendLabel(date: string): string {
@@ -156,15 +208,7 @@ export function normaliseCommandCenter(payload: ApiCommandCenter, source: DataSo
       predictedFailures: b.predicted_failure_count,
       maintenanceDue: b.maintenance_due_count ?? null,
     },
-    alerts: (payload.top_critical_alerts ?? []).map((alert, idx) => ({
-      key: `${alert.entity_id}-${alert.timestamp}-${idx}`,
-      title: alertTitle(alert.category, alert.description),
-      entityLabel: entityLabel(alert.entity_type, alert.entity_id),
-      stationId: alert.station_id,
-      timestamp: alert.timestamp,
-      severity: alert.severity,
-      tone: alertTone(alert.severity),
-    })),
+    alerts: (payload.top_critical_alerts ?? []).map(normaliseAlert),
     atRisk: (payload.top_at_risk_batteries ?? []).map((row) => ({
       batteryId: row.battery_id,
       stationId: row.station_id ?? null,
@@ -313,6 +357,167 @@ export function normaliseCharger(row: ApiCharger): ChargerRow {
     faulty: row.faulty,
     lastSeen: row.last_seen ?? null,
   };
+}
+
+/** GET /stations/{id} — same AI-scoring shape as a battery's detail. */
+export interface StationDetailView {
+  stationId: string;
+  location: string;
+  healthScore: number;
+  healthClassification: string;
+  anomalyScore: number;
+  anomalySeverity: string;
+  riskScore: number;
+  riskCategory: RiskCategory;
+  riskCategoryRaw: string;
+  priority: string;
+  likelyIssue: string;
+  predictionWindow: string;
+  scoredAt: string;
+  dimensions: { key: string; label: string; score: number }[];
+  detectedSignals: string[];
+  sla: string;
+  businessImpact: string;
+  suggestedChecks: string[];
+  riskNote: string;
+}
+
+export function normaliseStationDetail(detail: ApiStationDetail): StationDetailView {
+  return {
+    stationId: detail.station_id,
+    location: detail.location,
+    healthScore: detail.health_score,
+    healthClassification: detail.health_classification,
+    anomalyScore: detail.anomaly_score,
+    anomalySeverity: detail.anomaly_severity,
+    riskScore: detail.risk_score,
+    riskCategory: riskCategory(detail.risk_category),
+    riskCategoryRaw: detail.risk_category,
+    priority: detail.priority,
+    likelyIssue: detail.likely_issue,
+    predictionWindow: detail.prediction_window,
+    scoredAt: detail.scored_at,
+    dimensions: Object.entries(detail.dimension_scores ?? {}).map(([key, score]) => ({
+      key,
+      label: dimensionLabel(key),
+      score,
+    })),
+    detectedSignals: detail.detected_signals ?? [],
+    sla: detail.sla,
+    businessImpact: detail.business_impact,
+    suggestedChecks: detail.suggested_checks ?? [],
+    riskNote: detail.risk_note,
+  };
+}
+
+/** GET /operations/predictive-warnings — spans every asset type, so this is
+ * the real predictive-risk register (AI Predictions screen). */
+export interface PredictiveWarningRow {
+  assetType: string;
+  assetId: string;
+  location: string | null;
+  riskScore: number;
+  riskCategory: RiskCategory;
+  riskCategoryRaw: string;
+  priority: string;
+  likelyIssue: string;
+  predictionWindow: string;
+  scoredAt: string;
+  /** Link to the asset's own page, when this type has one. Docks don't have
+   * a dedicated page, so they link to their parent station instead. */
+  href: string | null;
+}
+
+function predictiveWarningHref(assetType: string, assetId: string): string | null {
+  const type = assetType.toUpperCase();
+  if (type === "BATTERY") return `/batteries/${assetId}`;
+  if (type === "STATION") return `/stations/${assetId}`;
+  // DOCK and CHARGER ids here look like "QIS-018-03" — no per-dock page
+  // exists, so link to the parent station (the id's first two segments).
+  const stationMatch = assetId.match(/^([A-Za-z]+-?\d+)-\d+$/);
+  if (stationMatch) return `/stations/${stationMatch[1].replace("-", "")}`;
+  return null;
+}
+
+export function normalisePredictiveWarning(row: ApiPredictiveWarning): PredictiveWarningRow {
+  return {
+    assetType: row.asset_type,
+    assetId: row.asset_id,
+    location: row.location,
+    riskScore: row.risk_score,
+    riskCategory: riskCategory(row.risk_category),
+    riskCategoryRaw: row.risk_category,
+    priority: row.priority,
+    likelyIssue: row.likely_issue,
+    predictionWindow: row.prediction_window,
+    scoredAt: row.scored_at,
+    href: predictiveWarningHref(row.asset_type, row.asset_id),
+  };
+}
+
+/** GET /assets — the dock register (QIS_DOCK assets), fully scored like a
+ * battery: health, anomaly and predictive risk. */
+export interface AssetRow {
+  assetId: string;
+  stationId: string;
+  location: string;
+  assetType: string;
+  operationalStatus: string;
+  healthScore: number;
+  healthClassification: string;
+  anomalyScore: number;
+  anomalySeverity: string;
+  riskScore: number;
+  riskCategory: RiskCategory;
+  riskCategoryRaw: string;
+  priority: string;
+  likelyIssue: string;
+  predictionWindow: string;
+}
+
+export function normaliseAsset(row: ApiAsset): AssetRow {
+  return {
+    assetId: row.asset_id,
+    stationId: row.station_id,
+    location: row.location,
+    assetType: row.asset_type,
+    operationalStatus: row.operational_status,
+    healthScore: row.health_score,
+    healthClassification: row.health_classification,
+    anomalyScore: row.anomaly_score,
+    anomalySeverity: row.anomaly_severity,
+    riskScore: row.risk_score,
+    riskCategory: riskCategory(row.risk_category),
+    riskCategoryRaw: row.risk_category,
+    priority: row.priority,
+    likelyIssue: row.likely_issue,
+    predictionWindow: row.prediction_window,
+  };
+}
+
+/** GET /assets/{id}/telemetry — daily dock-level aggregates. */
+export interface AssetTelemetryPointView {
+  date: string;
+  temperature: number;
+  chargingDuration: number;
+  current: number;
+  efficiency: number;
+  offlineRate: number;
+  swapSuccessRate: number;
+  alertCount: number;
+}
+
+export function normaliseAssetTelemetry(points: ApiAssetTelemetryPoint[]): AssetTelemetryPointView[] {
+  return points.map((p) => ({
+    date: p.date,
+    temperature: p.charger_temperature_mean,
+    chargingDuration: p.charging_duration_mean,
+    current: p.output_current_mean,
+    efficiency: p.efficiency_mean,
+    offlineRate: p.offline_rate,
+    swapSuccessRate: p.swap_success_rate,
+    alertCount: p.alert_count,
+  }));
 }
 
 /** Buckets for the Asset Health Distribution donut, from

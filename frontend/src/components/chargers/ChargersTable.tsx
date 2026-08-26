@@ -22,7 +22,14 @@ export function ChargersTable({ rows }: { rows: ChargerRow[] }) {
       header: "Charger ID",
       headerClassName: "w-[20%]",
       sortValue: (r) => r.chargerId,
-      render: (r) => <span className="font-medium text-text-primary">{r.chargerId}</span>,
+      render: (r) => (
+        <Link
+          href={`/chargers/${r.chargerId}?station=${r.stationId}`}
+          className="font-medium text-[var(--series-1)] hover:underline"
+        >
+          {r.chargerId}
+        </Link>
+      ),
     },
     {
       key: "dockId",

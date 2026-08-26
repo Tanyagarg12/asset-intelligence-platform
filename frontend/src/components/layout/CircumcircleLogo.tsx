@@ -1,43 +1,37 @@
 /**
- * Circumcircle Pvt Limited mark, drawn inline so it stays crisp at any size
- * and needs no asset pipeline — same approach as SunMobilityLogo. The shape
- * literally is a circumcircle: the unique circle passing through all three
- * vertices of a triangle. No official logo file was supplied; swap this for
- * an <Image> reading from `public/` if one is provided later.
+ * Circumcircle Innovations mark — a triangle with a circle circumscribing its
+ * apex, matching the supplied brand logo. Drawn inline so it stays crisp at
+ * any size and needs no asset pipeline, same approach as SunMobilityLogo.
  */
 export function CircumcircleLogo({ size = 16 }: { size?: number }) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 48 48"
+      viewBox="0 0 100 100"
       role="img"
-      aria-label="Circumcircle Pvt Limited"
+      aria-label="Circumcircle Innovations"
       className="flex-none"
     >
-      <circle
-        cx="24"
-        cy="24"
-        r="19.5"
-        fill="none"
-        stroke="var(--series-1)"
-        strokeWidth="3"
-      />
+      <circle cx="50" cy="33" r="19" fill="none" stroke="#4A1D19" strokeWidth="7" />
       <path
-        d="M24 5.5 L6.9 34.8 L41.1 34.8 Z"
-        fill="var(--series-1)"
-        fillOpacity="0.12"
-        stroke="var(--series-1)"
-        strokeWidth="2"
+        d="M50 17 L17 83 L83 83 Z"
+        fill="none"
+        stroke="#4A1D19"
+        strokeWidth="7"
         strokeLinejoin="round"
+        strokeLinecap="round"
       />
-      {[
-        [24, 5.5],
-        [6.9, 34.8],
-        [41.1, 34.8],
-      ].map(([cx, cy]) => (
-        <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="3" fill="var(--series-1)" />
-      ))}
     </svg>
+  );
+}
+
+/** Stacked wordmark used beside the icon in a "Powered by" lockup. */
+export function CircumcircleWordmark() {
+  return (
+    <span className="leading-[1.15]" style={{ color: "#4A1D19" }}>
+      <span className="block text-[12.5px] font-extrabold tracking-wide">CIRCUMCIRCLE</span>
+      <span className="block text-[9px] font-medium tracking-[0.18em]">INNOVATIONS</span>
+    </span>
   );
 }

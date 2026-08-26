@@ -45,12 +45,15 @@ export const ENDPOINTS = {
   // --- Stations & chargers ---
   stations: () => "/stations",
   stationsSummary: () => "/stations/summary",
+  station: (stationId: string) => `/stations/${id(stationId)}`,
   chargers: () => "/chargers",
   chargersSummary: () => "/chargers/summary",
 
   // --- Operations ---
   operationsSummary: () => "/operations/summary",
   operationsAlerts: (limit?: number) => `/operations/alerts${qs({ limit })}`,
+  operationsPredictiveWarnings: (p: { assetType?: string; minCategory?: string } = {}) =>
+    `/operations/predictive-warnings${qs({ asset_type: p.assetType, min_category: p.minCategory })}`,
   operationsRisk: (sortBy?: string, order?: "asc" | "desc") =>
     `/operations/risk${qs({ sort_by: sortBy, order })}`,
   operationsRiskSummary: () => "/operations/risk-summary",

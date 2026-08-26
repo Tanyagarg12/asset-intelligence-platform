@@ -7,6 +7,7 @@ import { RiskPill } from "@/components/ui/RiskPill";
 import { HealthBar, healthColor } from "@/components/ui/HealthBar";
 import { CreateFieldActionButton } from "@/components/battery/CreateFieldActionButton";
 import { getBatteryDetail } from "@/lib/api/resources";
+import { formatScoredAt } from "@/lib/formatScoredAt";
 
 const CLASSIFICATION_TONE: Record<string, string> = {
   HEALTHY: "var(--status-good)",
@@ -38,10 +39,7 @@ export default async function BatteryDetailPage({
     );
   }
 
-  const scored = new Date(battery.scoredAt);
-  const scoredLabel = Number.isNaN(scored.getTime())
-    ? battery.scoredAt
-    : scored.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  const scoredLabel = formatScoredAt(battery.scoredAt);
 
   return (
     <PageShell title={battery.batteryId} subtitle="Battery 360">

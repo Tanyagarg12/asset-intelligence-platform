@@ -185,7 +185,17 @@ export function DataTable<T>({
               <tr
                 key={rowKey(row)}
                 className={clsx("hover:bg-[var(--surface-2)]", rowHref && "cursor-pointer")}
-                onClick={rowHref ? () => router.push(rowHref(row)) : undefined}
+                onClick={
+                  rowHref
+                    ? (event) => {
+                        // A nested link/button (e.g. a Station column linking
+                        // elsewhere) should navigate itself, not be overridden
+                        // by the row's own click target.
+                        if ((event.target as HTMLElement).closest("a, button")) return;
+                        router.push(rowHref(row));
+                      }
+                    : undefined
+                }
               >
                 {columns.map((column) => (
                   <td

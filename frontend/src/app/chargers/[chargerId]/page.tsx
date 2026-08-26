@@ -1,11 +1,22 @@
 import Link from "next/link";
-import { ArrowLeft, LayoutGrid, Plug, Warehouse } from "lucide-react";
+import { ArrowLeft, Info, LayoutGrid, Plug, Sparkles, Warehouse } from "lucide-react";
 import { PageShell } from "@/components/layout/PageShell";
 import { Panel } from "@/components/ui/Panel";
 import { ApiErrorState } from "@/components/ui/ApiErrorState";
-import { HealthBar } from "@/components/ui/HealthBar";
+import { HealthBar, healthColor } from "@/components/ui/HealthBar";
+import { RiskPill } from "@/components/ui/RiskPill";
 import { StatusDot } from "@/components/ui/StatusDot";
+import { TelemetryChart } from "@/components/battery/TelemetryChart";
+import { CreateFieldActionButton } from "@/components/battery/CreateFieldActionButton";
 import { getChargerDetail } from "@/lib/api/resources";
+import { formatScoredAt } from "@/lib/formatScoredAt";
+
+function label(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 /** The service sends `last_seen: null` for chargers that have never reported;
  * without this guard `new Date(null)` renders as 1 Jan 1970. */
@@ -37,7 +48,7 @@ export default async function ChargerDetailPage({
     );
   }
 
-  const { charger, station, siblings } = data;
+  const { charger, station, dockRisk, telemetry } = data;
 
   return (
     <PageShell title={`${charger.stationId} · ${charger.chargerId}`} subtitle={`Dock ${charger.dockId}`}>
@@ -148,49 +159,107 @@ export default async function ChargerDetailPage({
           </Panel>
         )}
 
-        <Panel title="Other Chargers at This Station" titleNote={`(${siblings.length})`}>
-          {siblings.length === 0 ? (
-            <p className="text-[13px] text-text-muted">No other chargers reported at this station.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[480px] text-left">
-                <thead>
-                  <tr className="text-[11px] uppercase tracking-wide text-text-muted">
-                    <th className="pb-2 pr-3 font-medium">Charger</th>
-                    <th className="pb-2 pr-3 font-medium">Dock</th>
-                    <th className="pb-2 pr-3 font-medium">Status</th>
-                    <th className="pb-2 font-medium">Faulty</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border-hairline)]">
-                  {siblings.map((c) => (
-                    <tr key={c.chargerId} className="hover:bg-[var(--surface-2)]">
-                      <td className="py-2.5 pr-3 text-[13px]">
-                        <Link
-                          href={`/chargers/${c.chargerId}?station=${c.stationId}`}
-                          className="font-medium text-[var(--series-1)] hover:underline"
-                        >
-                          {c.chargerId}
-                        </Link>
-                      </td>
-                      <td className="py-2.5 pr-3 text-[13px] text-text-secondary">{c.dockId}</td>
-                      <td className="py-2.5 pr-3">
-                        <StatusDot status={c.online ? "ONLINE" : "OFFLINE"} />
-                      </td>
-                      <td className="py-2.5 text-[13px]">
-                        {c.faulty ? (
-                          <span className="font-medium text-[var(--status-critical)]">Yes</span>
-                        ) : (
-                          <span className="text-text-muted">No</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* There is no per-charger scoring endpoint on this platform — a
+            charger's own health/risk comes from the dock it sits on, cross-
+            referenced via GET /assets (see deriveDockAssetId in resources.ts).
+            When that lookup doesn't resolve, this says so instead of hiding
+            the gap or inventing a score. */}
+        {dockRisk ? (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Panel>
+              <div className="text-[12px] text-text-muted">Dock Health ({dockRisk.assetId})</div>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[15px] font-semibold tabular-nums" style={{ color: healthColor(dockRisk.healthScore) }}>
+                  {dockRisk.healthScore}/100
+                </span>
+                <span className="text-[12px] text-text-muted">{label(dockRisk.healthClassification)}</span>
+              </div>
+              <div className="mt-4 text-[12px] text-text-muted">Anomaly</div>
+              <div className="mt-1 text-[15px] font-semibold tabular-nums text-text-primary">
+                {dockRisk.anomalyScore}
+                <span className="ml-1 text-[12px] font-normal text-text-muted">{label(dockRisk.anomalySeverity)}</span>
+              </div>
+            </Panel>
+
+            <Panel>
+              <div className="text-[12px] text-text-muted">Predictive Risk</div>
+              <div className="mt-1">
+                <RiskPill percent={dockRisk.riskScore} category={dockRisk.riskCategory} showCategory />
+              </div>
+              <div className="mt-4 text-[12px] text-text-muted">Priority</div>
+              <div className="mt-1 text-[15px] font-semibold text-text-primary">{dockRisk.priority}</div>
+              <div className="mt-4 text-[12px] text-text-muted">Prediction Window</div>
+              <div className="mt-1 text-[13px] font-medium text-text-primary">{dockRisk.predictionWindow}</div>
+            </Panel>
+
+            <Panel title="AI Insight" action={<Sparkles size={16} className="text-[var(--series-1)]" />}>
+              <p className="text-[13px] font-medium leading-relaxed text-text-primary">{dockRisk.likelyIssue}</p>
+              <p className="mt-3 text-[11.5px] leading-relaxed text-text-muted">
+                Scored at the dock this charger sits on ({dockRisk.assetId}) — this platform has no separate
+                per-charger scoring engine.
+              </p>
+              <dl className="mt-4 space-y-1.5 border-t border-[var(--border-hairline)] pt-3 text-[12px]">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-text-muted">Business impact</dt>
+                  <dd className="font-medium text-text-secondary">{dockRisk.businessImpact ?? "Not available"}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-text-muted">SLA</dt>
+                  <dd className="text-right font-medium text-text-secondary">
+                    Not available
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-text-muted">Scored at</dt>
+                  <dd className="font-medium text-text-secondary">
+                    {dockRisk.scoredAt ? formatScoredAt(dockRisk.scoredAt) : "Not available"}
+                  </dd>
+                </div>
+              </dl>
+            </Panel>
+          </div>
+        ) : (
+          <Panel>
+            <div className="flex items-start gap-2.5 text-[13px] text-text-secondary">
+              <Info size={16} className="mt-0.5 flex-none text-[var(--series-1)]" />
+              <span>
+                <span className="font-semibold text-text-primary">No predictive risk data for this charger.</span>{" "}
+                This platform scores docks, not chargers directly, and this charger&apos;s dock could not be
+                cross-referenced in the dock register.
+              </span>
             </div>
-          )}
-        </Panel>
+          </Panel>
+        )}
+
+        {dockRisk && (
+          <Panel title="Recommended Field Action">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <p className="text-[13px] text-text-secondary">
+                  <span className="font-semibold text-text-primary">{dockRisk.priority}</span> ·{" "}
+                  {dockRisk.likelyIssue}
+                </p>
+                <p className="mt-2 text-[12px] text-text-muted">
+                  This platform doesn&apos;t provide a per-dock/charger checklist — inspect this charger and
+                  its dock for signs of the likely issue above.
+                </p>
+              </div>
+              <CreateFieldActionButton batteryId={charger.chargerId} sla="Not available" priority={dockRisk.priority} />
+            </div>
+          </Panel>
+        )}
+
+        {telemetry.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Panel title="Charger Temperature" titleNote="(daily avg, °C)">
+              <TelemetryChart data={telemetry} dataKey="temperature" color="var(--status-critical)" unit="°C" gradientId="charger-temp" />
+            </Panel>
+            <Panel title="Charging Duration" titleNote="(daily avg, seconds)">
+              <TelemetryChart data={telemetry} dataKey="chargingDuration" color="var(--series-1)" unit="s" gradientId="charger-duration" />
+            </Panel>
+          </div>
+        )}
+
       </div>
     </PageShell>
   );
