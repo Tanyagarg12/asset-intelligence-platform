@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { CircumcircleLogo } from "@/components/layout/CircumcircleLogo";
 import { CopilotWidget } from "@/components/copilot/CopilotWidget";
 import { getHeaderContext } from "@/lib/api/resources";
 import "./globals.css";
@@ -47,8 +48,11 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             it scrolls away with the page instead of staying pinned on screen. */}
         <main className="flex-1 overflow-y-auto bg-[var(--surface-0)]">
           {children}
-          <footer className="border-t border-[var(--border-hairline)] bg-[var(--surface-1)] px-5 py-1.5 text-left text-[11px] text-text-muted">
-            Powered by Circumcircle Pvt Limited
+          <footer className="flex items-center gap-1.5 border-t border-[var(--border-hairline)] bg-[var(--surface-1)] px-5 py-2 text-[11px] text-text-muted">
+            <CircumcircleLogo size={14} />
+            <span>
+              Powered by <span className="font-medium text-text-secondary">Circumcircle Pvt Limited</span>
+            </span>
           </footer>
         </main>
         <CopilotWidget />

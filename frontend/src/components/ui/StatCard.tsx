@@ -12,6 +12,9 @@ export interface StatBreakdown {
 /** An individual asset listed under a stat, ranked by how much attention it needs. */
 export interface RiskItem {
   id: string;
+  /** Unique across the list; defaults to `id`. Set explicitly when `id` alone
+   * can repeat (e.g. charger_id is reused across stations). */
+  key?: string;
   href: string;
   /** Secondary line — the issue, station, or whatever identifies it. */
   detail: string;
@@ -140,7 +143,7 @@ export function StatCard({
           ) : (
             <ul className="divide-y divide-[var(--border-hairline)]">
               {ranked.map((item) => (
-                <li key={item.id}>
+                <li key={item.key ?? item.id}>
                   <Link
                     href={item.href}
                     className="-mx-1 flex items-center gap-2 rounded-md px-1 py-1.5 hover:bg-[var(--surface-2)]"

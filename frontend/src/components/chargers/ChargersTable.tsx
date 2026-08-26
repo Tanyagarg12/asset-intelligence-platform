@@ -75,9 +75,10 @@ export function ChargersTable({ rows }: { rows: ChargerRow[] }) {
     <DataTable
       rows={rows}
       columns={columns}
-      rowKey={(r) => r.chargerId}
-      // No charger detail screen exists; a charger's home is its station page.
-      rowHref={(r) => `/stations/${r.stationId}`}
+      // charger_id repeats across stations, so the station id disambiguates
+      // which charger the row means.
+      rowKey={(r) => `${r.stationId}-${r.chargerId}`}
+      rowHref={(r) => `/chargers/${r.chargerId}?station=${r.stationId}`}
       searchFields={(r) => [r.chargerId, r.dockId, r.stationId]}
       searchPlaceholder="Search charger, dock or station…"
       filters={{

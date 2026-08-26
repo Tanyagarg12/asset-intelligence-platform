@@ -11,11 +11,14 @@ import type { BatteryDetailView } from "@/lib/api/normalise";
 import {
   loadBatteryDetail,
   loadSnapshot,
+  toolAmbiguousCharger,
   toolAttentionToday,
   toolCompare,
   toolDeteriorating,
   toolEngineerChecks,
   toolExplainBattery,
+  toolExplainCharger,
+  toolExplainStation,
   toolOperationalSummary,
   toolRecentChanges,
   toolTopStations,
@@ -33,7 +36,15 @@ interface Entities {
   count: number | null;
 }
 
-/** Identifier shapes in this fleet: BAT001, QIS001, QIS-001-01, CHG001. */
+/**
+ * Identifier shapes in this fleet: BAT001, QIS001, QIS-001-01, CHG001 — but
+ * how many digits each type is zero-padded to is a dataset detail, not
+ * something to hardcode: this platform has shipped 3-digit batteries
+ * (BAT001) and 5-digit batteries (BAT02153) from different demo datasets,
+ * and 3-digit vs 2-digit chargers likewise. So the digit run is captured
+ * exactly as typed, with no reformatting — `normalizeId` (below) is what
+ * makes a typed id match the platform's real one regardless of padding.
+ */
 function extractEntities(question: string): Entities {
   const e: Entities = {
     batteryIds: [],
@@ -44,14 +55,14 @@ function extractEntities(question: string): Entities {
     count: null,
   };
 
-  for (const m of question.matchAll(/\bBAT[-\s]?0*(\d{1,4})\b/gi)) {
-    e.batteryIds.push(`BAT${m[1].padStart(3, "0")}`);
+  for (const m of question.matchAll(/\bBAT[-\s]?(\d{1,6})\b/gi)) {
+    e.batteryIds.push(`BAT${m[1]}`);
   }
   // Dock ids look like QIS-001-01; check them before the plain station form.
   for (const m of question.matchAll(/\bQIS[-\s]?(\d{3})[-\s](\d{1,2})\b/gi)) {
     e.dockIds.push(`QIS-${m[1]}-${m[2].padStart(2, "0")}`);
   }
-  for (const m of question.matchAll(/\bQIS[-\s]?0*(\d{1,4})\b(?![-\s]\d)/gi)) {
+  for (const m of question.matchAll(/\bQIS[-\s]?(\d{1,6})\b(?![-\s]\d)/gi)) {
     const raw = m[1];
     // The requirements document's worked example (QIS-128) is not in this fleet.
     if (raw.length <= 3 && Number(raw) > 60) {
@@ -59,11 +70,11 @@ function extractEntities(question: string): Entities {
         `QIS-${raw} is the example from the requirements document and is not an identifier in this fleet — stations are QIS001, docks QIS-001-01, batteries BAT001.`,
       );
     } else {
-      e.stationIds.push(`QIS${raw.padStart(3, "0")}`);
+      e.stationIds.push(`QIS${raw}`);
     }
   }
-  for (const m of question.matchAll(/\bCHG[-\s]?0*(\d{1,4})\b/gi)) {
-    e.chargerIds.push(`CHG${m[1].padStart(3, "0")}`);
+  for (const m of question.matchAll(/\bCHG[-\s]?(\d{1,6})\b/gi)) {
+    e.chargerIds.push(`CHG${m[1]}`);
   }
 
   const count = question.match(/\btop\s*(\d{1,3})\b/i);
@@ -72,6 +83,15 @@ function extractEntities(question: string): Entities {
   e.batteryIds = [...new Set(e.batteryIds)];
   e.stationIds = [...new Set(e.stationIds)];
   return e;
+}
+
+/** Makes "BAT02153", "bat2153" and "BAT-2153" compare equal, so a typed id
+ * matches the platform's real one regardless of how many digits it is
+ * zero-padded to. The real, exactly-padded id (from the live snapshot) is
+ * always what gets used for API calls and links — this is only for matching. */
+function normalizeId(id: string): string {
+  const m = id.match(/^([A-Za-z]+)-?0*(\d+)$/);
+  return m ? `${m[1].toUpperCase()}${m[2]}` : id.toUpperCase();
 }
 
 const TREND_PATTERNS: [RegExp, string][] = [
@@ -171,13 +191,21 @@ export async function answerQuestion(question: string): Promise<CopilotAnswer> {
     return wrap("unavailable", serviceUnavailable(error instanceof Error ? error.message : String(error)));
   }
 
-  // Resolve any named batteries against the live fleet.
+  // Resolve any named batteries against the live fleet first — the platform's
+  // GET /batteries/{id} needs the real, exactly-padded id (a normalized guess
+  // like "BAT2153" 404s against the real "BAT02153"), so the typed id is
+  // matched against the snapshot's real ids before it is ever sent as a call.
   const details: BatteryDetailView[] = [];
   const unresolved: string[] = [];
-  for (const id of entities.batteryIds.slice(0, 2)) {
-    const detail = await loadBatteryDetail(id);
+  for (const typedId of entities.batteryIds.slice(0, 2)) {
+    const real = snap.batteries.find((b) => normalizeId(b.batteryId) === normalizeId(typedId));
+    if (!real) {
+      unresolved.push(typedId);
+      continue;
+    }
+    const detail = await loadBatteryDetail(real.batteryId);
     if (detail) details.push(detail);
-    else unresolved.push(id);
+    else unresolved.push(typedId);
   }
   const primary = details[0] ?? null;
 
@@ -196,6 +224,37 @@ export async function answerQuestion(question: string): Promise<CopilotAnswer> {
 
   if (/\bwhy\b/i.test(q) && primary) {
     return wrap("explain_risk", toolExplainBattery(primary));
+  }
+
+  // A single named charger or station, asked about directly — show that one
+  // asset's own detail (same facts as its page) rather than a fleet-wide list.
+  if (entities.chargerIds.length === 1 && !/\btop\b/i.test(q)) {
+    const chargerId = entities.chargerIds[0];
+    // charger_id repeats at every station (CHG01..CHG15 reused fleet-wide),
+    // so a station named in the same question disambiguates which one.
+    const candidates = snap.chargers.filter((c) => normalizeId(c.chargerId) === normalizeId(chargerId));
+    const namedStationId = entities.stationIds[0];
+    const charger = namedStationId
+      ? candidates.find((c) => normalizeId(c.stationId) === normalizeId(namedStationId))
+      : candidates.length === 1
+        ? candidates[0]
+        : undefined;
+
+    if (charger) {
+      const station = snap.stations.find((s) => normalizeId(s.stationId) === normalizeId(charger.stationId));
+      return wrap("asset_lookup", toolExplainCharger(charger, station));
+    }
+    if (candidates.length > 1) {
+      return wrap("asset_lookup", toolAmbiguousCharger(chargerId, candidates));
+    }
+    unresolved.push(chargerId);
+  }
+
+  if (entities.stationIds.length === 1 && !/\b(top|worst|most critical|highest)\b/i.test(q)) {
+    const stationId = entities.stationIds[0];
+    const station = snap.stations.find((s) => normalizeId(s.stationId) === normalizeId(stationId));
+    if (station) return wrap("asset_lookup", toolExplainStation(station));
+    unresolved.push(stationId);
   }
 
   if (/\b(?:top|worst|most critical|highest)\b/i.test(q) && /\bstation/i.test(q)) {
@@ -220,8 +279,17 @@ export async function answerQuestion(question: string): Promise<CopilotAnswer> {
   }
 
   if (primary) return wrap("explain_risk", toolExplainBattery(primary));
-  if (entities.stationIds.length > 0) {
-    return wrap("top_critical_stations", toolTopStations(snap, snap.stations.length));
+  // More than one station named (e.g. a comparison-style question the compare
+  // branch didn't catch) — rank just the mentioned ones rather than the whole
+  // fleet. A single named-but-not-found station already went to `unresolved`
+  // above and falls through to `unknown` below instead of dumping everything.
+  if (entities.stationIds.length > 1) {
+    const named = snap.stations.filter((s) =>
+      entities.stationIds.some((id) => normalizeId(id) === normalizeId(s.stationId)),
+    );
+    if (named.length > 0) {
+      return wrap("top_critical_stations", toolTopStations({ ...snap, stations: named }, named.length));
+    }
   }
   if (trend) return wrap("trend_search", toolTrendSearch(snap, trend, entities.count ?? 8));
 

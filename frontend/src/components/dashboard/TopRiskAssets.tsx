@@ -5,6 +5,9 @@ export type AssetKind = "battery" | "charger" | "station";
 
 export interface RankedAsset {
   id: string;
+  /** Unique across the list; defaults to `kind-id`. Set explicitly when `id`
+   * alone can repeat (e.g. charger_id is reused across stations). */
+  key?: string;
   kind: AssetKind;
   href: string;
   issue: string;
@@ -64,7 +67,7 @@ export function TopRiskAssets({ assets, limit = 6 }: { assets: RankedAsset[]; li
         const Icon = style.icon;
         const tone = riskColor(asset.risk);
         return (
-          <li key={`${asset.kind}-${asset.id}`}>
+          <li key={asset.key ?? `${asset.kind}-${asset.id}`}>
             <Link
               href={asset.href}
               className="group flex items-center gap-3 rounded-lg border border-[var(--border-hairline)] px-3 py-2 transition-colors hover:border-[var(--series-1)] hover:bg-[var(--surface-2)]"

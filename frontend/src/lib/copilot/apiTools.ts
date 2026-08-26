@@ -15,10 +15,12 @@ import {
 import {
   normaliseBattery,
   normaliseBatteryDetail,
+  normaliseCharger,
   normaliseStation,
   riskCategory,
   type BatteryDetailView,
   type BatteryRow,
+  type ChargerRow,
   type StationRow,
 } from "@/lib/api/normalise";
 import type { ApiCommandCenter } from "@/lib/api/types";
@@ -31,6 +33,7 @@ const RISK_LANGUAGE =
 export interface FleetSnapshot {
   batteries: BatteryRow[];
   stations: StationRow[];
+  chargers: ChargerRow[];
   commandCenter: ApiCommandCenter | null;
   chargersFaulty: number;
 }
@@ -42,11 +45,14 @@ export async function loadSnapshot(): Promise<FleetSnapshot> {
       .then((rows) => rows.map(normaliseStation))
       .catch(() => []),
     fetchCommandCenter().catch(() => null),
-    fetchChargers().catch(() => []),
+    fetchChargers()
+      .then((rows) => rows.map(normaliseCharger))
+      .catch(() => []),
   ]);
   return {
     batteries,
     stations,
+    chargers,
     commandCenter,
     chargersFaulty: chargers.filter((c) => c.faulty).length,
   };
@@ -159,6 +165,92 @@ export function toolExplainBattery(detail: BatteryDetailView): ToolResult {
     ],
     links: [batteryLink(detail.batteryId)],
     caveat: detail.riskNote || RISK_LANGUAGE,
+    primaryPage: { label: `${detail.batteryId}'s full page`, href: `/batteries/${detail.batteryId}` },
+  };
+}
+
+/** "What's the status of QIS003?" / "Tell me about QIS003" — a specific,
+ * named station rather than a top-N ranking across all of them. */
+export function toolExplainStation(station: StationRow): ToolResult {
+  const bullets = [
+    `${station.dockCount} docks — ${station.healthyDocks} healthy, ${station.atRiskDocks} at risk, ${station.criticalDocks} critical.`,
+    `Chargers: ${station.chargersOnline} online, ${station.chargersOffline} offline.`,
+    station.highRiskDocks > 0
+      ? `${station.highRiskDocks} dock(s) are in the high-risk band.`
+      : "No dock at this station is in the high-risk band.",
+  ];
+  if (!station.online) bullets.unshift("This station is currently reporting offline.");
+
+  return {
+    tool: "explain_station",
+    headline: `${station.stationId} — average dock health ${station.avgHealthScore}/100${station.online ? "" : " (offline)"}.`,
+    bullets,
+    evidence: [
+      { label: "Docks", value: `${station.dockCount}` },
+      { label: "Avg health", value: `${station.avgHealthScore}/100` },
+      { label: "High risk docks", value: `${station.highRiskDocks}` },
+      { label: "Source", value: "Station register", href: `/stations/${station.stationId}` },
+    ],
+    links: [{ label: station.stationId, href: `/stations/${station.stationId}` }],
+    caveat: RISK_LANGUAGE,
+    primaryPage: { label: `${station.stationId}'s full page`, href: `/stations/${station.stationId}` },
+  };
+}
+
+/** "Is CHG12 online?" / "Tell me about CHG12" — a specific, named charger.
+ *
+ * `charger_id` is reused across every station (CHG01..CHG15 at each one), so
+ * the charger's own page needs `?station=` to say which one is meant. */
+export function toolExplainCharger(charger: ChargerRow, station: StationRow | undefined): ToolResult {
+  const chargerHref = `/chargers/${charger.chargerId}?station=${charger.stationId}`;
+  const bullets = [
+    `Dock ${charger.dockId} at station ${charger.stationId}.`,
+    charger.online ? "Currently online." : "Currently offline.",
+    charger.faulty ? "A fault is reported on this charger." : "No fault is reported on this charger.",
+  ];
+  if (station) {
+    bullets.push(`Its station (${station.stationId}) has average dock health ${station.avgHealthScore}/100.`);
+  }
+
+  return {
+    tool: "explain_charger",
+    headline: `${charger.chargerId} at ${charger.stationId} is ${charger.online ? "online" : "offline"}${charger.faulty ? " and reporting a fault" : ""}.`,
+    bullets,
+    evidence: [
+      { label: "Dock", value: charger.dockId },
+      { label: "Station", value: charger.stationId, href: `/stations/${charger.stationId}` },
+      { label: "Faulty", value: charger.faulty ? "Yes" : "No" },
+      { label: "Source", value: "Charger register", href: chargerHref },
+    ],
+    links: [
+      { label: `${charger.chargerId} @ ${charger.stationId}`, href: chargerHref },
+      { label: charger.stationId, href: `/stations/${charger.stationId}` },
+    ],
+    caveat: RISK_LANGUAGE,
+    primaryPage: { label: `${charger.chargerId}'s full page`, href: chargerHref },
+  };
+}
+
+/** "Is CHG12 online?" without naming a station — charger_id alone is
+ * ambiguous (reused at every station), so ask which one rather than
+ * silently picking one and presenting it as the answer. */
+export function toolAmbiguousCharger(chargerId: string, candidates: ChargerRow[]): ToolResult {
+  const shown = candidates.slice(0, 8);
+  return {
+    tool: "explain_charger",
+    headline: `${chargerId} exists at ${candidates.length} different stations — which one did you mean?`,
+    bullets: shown.map(
+      (c) => `${c.stationId} — ${c.online ? "online" : "offline"}${c.faulty ? ", fault reported" : ""}`,
+    ),
+    evidence: [
+      { label: "Matches", value: `${candidates.length} station(s)` },
+      { label: "Note", value: "charger_id is reused at every station (CHG01..CHG15), not globally unique" },
+    ],
+    links: shown.map((c) => ({
+      label: `${chargerId} @ ${c.stationId}`,
+      href: `/chargers/${chargerId}?station=${c.stationId}`,
+    })),
+    caveat: `Ask again naming the station too, e.g. "Is ${chargerId} at ${shown[0]?.stationId ?? "QIS001"} online?".`,
   };
 }
 
@@ -277,6 +369,7 @@ export function toolEngineerChecks(detail: BatteryDetailView | null, snap: Fleet
     ],
     links: [batteryLink(detail.batteryId)],
     caveat: `${detail.riskNote || RISK_LANGUAGE} Engineer assignment is out of scope for Phase 1.`,
+    primaryPage: { label: `${detail.batteryId}'s full page`, href: `/batteries/${detail.batteryId}` },
   };
 }
 

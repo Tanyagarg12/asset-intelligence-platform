@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, History, Send, Sparkles, SquarePen, Trash2, X } from "lucide-react";
+import { Bot, Check, History, Send, Share2, Sparkles, SquarePen, Trash2, X } from "lucide-react";
 import clsx from "clsx";
 import { SUGGESTED_QUESTIONS, type ChatMessage, type CopilotAnswer } from "@/lib/copilot/types";
+import { buildShareUrl } from "@/lib/copilot/share";
 import { AnswerCard } from "./AnswerCard";
 
 /** One saved copilot conversation. Kept in localStorage so history survives
@@ -50,6 +51,7 @@ export function CopilotWidget() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -109,6 +111,21 @@ export function CopilotWidget() {
   function deleteConversation(id: string) {
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (activeId === id) setActiveId(null);
+  }
+
+  async function shareActiveConversation() {
+    if (!active || active.messages.length === 0) return;
+    const url = buildShareUrl({ title: active.title, sharedAt: Date.now(), messages: active.messages });
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareStatus("copied");
+    } catch {
+      // Clipboard access can be blocked (permissions, insecure context); open
+      // the link itself so the address bar becomes the fallback copy source.
+      window.open(url, "_blank", "noopener,noreferrer");
+      setShareStatus("error");
+    }
+    setTimeout(() => setShareStatus("idle"), 3000);
   }
 
   async function ask(question: string) {
@@ -196,6 +213,19 @@ export function CopilotWidget() {
               </span>
             </div>
             <div className="flex flex-none items-center gap-1">
+              {!showHistory && active && active.messages.length > 0 && (
+                <button
+                  onClick={shareActiveConversation}
+                  aria-label="Copy a share link for this chat"
+                  title={shareStatus === "copied" ? "Link copied!" : "Share this chat"}
+                  className={clsx(
+                    "flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--surface-2)] hover:text-text-primary",
+                    shareStatus === "copied" ? "text-[var(--status-good)]" : "text-text-muted",
+                  )}
+                >
+                  {shareStatus === "copied" ? <Check size={16} /> : <Share2 size={16} />}
+                </button>
+              )}
               <button
                 onClick={startNewChat}
                 aria-label="Start a new chat"
@@ -224,6 +254,20 @@ export function CopilotWidget() {
               </button>
             </div>
           </header>
+          {shareStatus !== "idle" && (
+            <div
+              className={clsx(
+                "flex-none px-4 py-1.5 text-center text-[11.5px] font-medium",
+                shareStatus === "copied"
+                  ? "bg-[color-mix(in_srgb,var(--status-good)_12%,transparent)] text-[var(--status-good)]"
+                  : "bg-[var(--status-warning-bg)] text-[var(--status-warning)]",
+              )}
+            >
+              {shareStatus === "copied"
+                ? "Share link copied to clipboard."
+                : "Could not copy automatically — opened the link in a new tab, copy it from there."}
+            </div>
+          )}
 
           {showHistory ? (
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">

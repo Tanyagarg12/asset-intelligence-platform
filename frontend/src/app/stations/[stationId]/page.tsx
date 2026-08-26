@@ -109,8 +109,13 @@ export default async function StationDetailPage({
                 <tbody className="divide-y divide-[var(--border-hairline)]">
                   {chargers.map((charger) => (
                     <tr key={charger.chargerId} className="hover:bg-[var(--surface-2)]">
-                      <td className="py-2.5 pr-3 text-[13px] font-medium text-text-primary">
-                        {charger.chargerId}
+                      <td className="py-2.5 pr-3 text-[13px]">
+                        <Link
+                          href={`/chargers/${charger.chargerId}?station=${station.stationId}`}
+                          className="font-medium text-[var(--series-1)] hover:underline"
+                        >
+                          {charger.chargerId}
+                        </Link>
                       </td>
                       <td className="py-2.5 pr-3 text-[13px] text-text-secondary">{charger.dockId}</td>
                       <td className="py-2.5 pr-3">

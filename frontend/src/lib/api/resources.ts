@@ -119,6 +119,56 @@ export function getChargersPage(): Promise<Loaded<ChargerRow[]>> {
   return load(async () => (await fetchChargers()).map(normaliseCharger));
 }
 
+export interface ChargerDetailData {
+  charger: ChargerRow;
+  station: StationRow | null;
+  /** Other chargers at the same station, for context on the charger's page. */
+  siblings: ChargerRow[];
+}
+
+/**
+ * There is no GET /chargers/{id} either, so — same approach as station
+ * detail — this is assembled from the charger list plus the station list.
+ *
+ * `charger_id` is NOT unique across the fleet — the service reuses a small
+ * pool (CHG01..CHG15, one per dock position) at every station, so "CHG12"
+ * alone matches ~26 different chargers. `stationId` disambiguates; every
+ * internal link passes it. Without it, the first match is used and the
+ * result is unreliable — callers should always supply it when known.
+ */
+export function getChargerDetail(chargerId: string, stationId?: string): Promise<Loaded<ChargerDetailData>> {
+  return load(async () => {
+    const [chargers, stations] = await Promise.all([fetchChargers(), fetchStations().catch(() => [])]);
+    const match = chargers.find(
+      (c) =>
+        c.charger_id.toLowerCase() === chargerId.toLowerCase() &&
+        (!stationId || c.station_id.toLowerCase() === stationId.toLowerCase()),
+    );
+    if (!match) {
+      throw new ApiUnavailableError(
+        stationId ? `Charger ${chargerId} was not found at station ${stationId}` : `Charger ${chargerId} was not found`,
+        404,
+      );
+    }
+
+    const charger = normaliseCharger(match);
+    const stationMatch = stations.find((s) => s.station_id.toLowerCase() === charger.stationId.toLowerCase());
+    const siblings = chargers
+      .filter(
+        (c) =>
+          c.station_id.toLowerCase() === charger.stationId.toLowerCase() &&
+          c.charger_id.toLowerCase() !== charger.chargerId.toLowerCase(),
+      )
+      .map(normaliseCharger);
+
+    return {
+      charger,
+      station: stationMatch ? normaliseStation(stationMatch) : null,
+      siblings,
+    };
+  });
+}
+
 export interface HeaderAlert {
   key: string;
   title: string;

@@ -18,7 +18,11 @@ export async function PageShell({
   const header = await getHeaderContext();
 
   return (
-    <div className="flex min-h-full flex-col">
+    // No min-h-full/flex-1 here: this block's height must stay intrinsic to
+    // its own content, so the site footer (rendered after it in the root
+    // layout) sits right below the page instead of being forced down to the
+    // viewport's full height on any page shorter than the screen.
+    <div className="flex flex-col">
       <Topbar
         title={title}
         subtitle={subtitle}
@@ -27,9 +31,7 @@ export async function PageShell({
         locations={header.locations}
         dataAsOf={header.dataAsOf}
       />
-      {/* pb-3 is the only bottom gap; the floating copilot button clears the
-          last row because panels end short of the viewport edge. */}
-      <div className="flex-1 px-5 pb-3 pt-3">{children}</div>
+      <div className="px-5 pb-3 pt-3">{children}</div>
     </div>
   );
 }

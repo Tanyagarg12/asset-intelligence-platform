@@ -27,6 +27,9 @@ export interface ToolResult {
   links: { label: string; href: string }[];
   /** Uncertainty / scope statement. Guardrail: always state the limits. */
   caveat?: string;
+  /** Set when the answer is about one specific asset — rendered as a
+   * "look at this page for more" call to action pointing at its full screen. */
+  primaryPage?: { label: string; href: string };
 }
 
 export interface CopilotAnswer extends ToolResult {

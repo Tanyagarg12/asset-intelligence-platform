@@ -73,6 +73,16 @@ export function AnswerCard({ answer }: { answer: CopilotAnswer }) {
           <span>{answer.caveat}</span>
         </p>
       )}
+
+      {answer.primaryPage && (
+        <Link
+          href={answer.primaryPage.href}
+          className="flex items-center gap-1 border-t border-[var(--border-hairline)] pt-2 text-[12px] font-medium text-[var(--series-1)] hover:underline"
+        >
+          Look at {answer.primaryPage.label} for more
+          <ArrowUpRight size={12} />
+        </Link>
+      )}
     </div>
   );
 }

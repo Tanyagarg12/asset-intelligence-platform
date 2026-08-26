@@ -46,11 +46,14 @@ export default async function DashboardPage({
     tag: station.online ? undefined : "Offline",
   }));
 
+  // charger_id repeats across stations (CHG01..CHG15 reused at every
+  // station), so the row key and link both need the station id too.
   const chargerItems: RiskItem[] = chargers
     .filter((charger) => charger.faulty || !charger.online)
     .map((charger) => ({
       id: charger.chargerId,
-      href: `/stations/${charger.stationId}`,
+      key: `${charger.stationId}-${charger.chargerId}`,
+      href: `/chargers/${charger.chargerId}?station=${charger.stationId}`,
       detail: `${charger.dockId} · ${charger.stationId}`,
       risk: charger.faulty ? 90 : 60,
       tag: charger.faulty ? "Faulty" : "Offline",
@@ -72,8 +75,9 @@ export default async function DashboardPage({
       .filter((charger) => charger.faulty || !charger.online)
       .map((charger) => ({
         id: charger.chargerId,
+        key: `charger-${charger.stationId}-${charger.chargerId}`,
         kind: "charger" as const,
-        href: `/stations/${charger.stationId}`,
+        href: `/chargers/${charger.chargerId}?station=${charger.stationId}`,
         issue: charger.faulty ? "Charger fault reported" : "Charger not reporting",
         location: `${charger.dockId} · ${charger.stationId}`,
         risk: charger.faulty ? 90 : 60,
@@ -105,7 +109,7 @@ export default async function DashboardPage({
   }));
 
   return (
-    <PageShell title="Asset Intelligence Platform" subtitle="Overview of Stations, Chargers & Batteries">
+    <PageShell title="Dashboard" subtitle="Overview of Stations, Chargers & Batteries">
       <div className="flex flex-col gap-3">
         <DataSourceBadge source={data.source} />
         <CriticalAlertBanner rows={data.atRisk} />
