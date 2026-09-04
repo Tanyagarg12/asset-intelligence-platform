@@ -592,6 +592,39 @@ export function normaliseAssetTelemetry(points: ApiAssetTelemetryPoint[]): Asset
   }));
 }
 
+/** There is no station-level telemetry endpoint — only per-dock (GET
+ * /assets/{id}/telemetry). A station's trend is built by averaging every
+ * dock at that station on each date (summing alert counts, since that's a
+ * total rather than a mean). Docks that don't report on a given date simply
+ * don't contribute to that date's average. */
+export function aggregateStationTelemetry(perDock: AssetTelemetryPointView[][]): AssetTelemetryPointView[] {
+  const byDate = new Map<string, AssetTelemetryPointView[]>();
+  for (const series of perDock) {
+    for (const point of series) {
+      const bucket = byDate.get(point.date);
+      if (bucket) bucket.push(point);
+      else byDate.set(point.date, [point]);
+    }
+  }
+
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const mean = (points: AssetTelemetryPointView[], key: keyof AssetTelemetryPointView) =>
+    round1(points.reduce((sum, p) => sum + (p[key] as number), 0) / points.length);
+
+  return [...byDate.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, points]) => ({
+      date,
+      temperature: mean(points, "temperature"),
+      chargingDuration: mean(points, "chargingDuration"),
+      current: mean(points, "current"),
+      efficiency: mean(points, "efficiency"),
+      offlineRate: mean(points, "offlineRate"),
+      swapSuccessRate: mean(points, "swapSuccessRate"),
+      alertCount: points.reduce((sum, p) => sum + p.alertCount, 0),
+    }));
+}
+
 /** Buckets for the Asset Health Distribution donut, from
  * GET /operations/health-distribution. */
 export function normaliseDistribution(dist: ApiHealthDistribution): Bucket[] {

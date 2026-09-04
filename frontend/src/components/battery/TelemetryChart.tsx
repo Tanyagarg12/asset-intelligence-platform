@@ -1,17 +1,20 @@
 "use client";
 
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { AssetTelemetryPointView } from "@/lib/api/normalise";
 
-export function TelemetryChart({
+// Generic over any daily series with a `date` field — used for real dock
+// telemetry (AssetTelemetryPointView) and, with a visible "demo data" label
+// wherever it's used that way, fabricated preview series like the Vehicles
+// page's (see lib/dummy/vehicles.ts).
+export function TelemetryChart<T extends { date: string }>({
   data,
   dataKey,
   color,
   unit,
   gradientId,
 }: {
-  data: AssetTelemetryPointView[];
-  dataKey: keyof AssetTelemetryPointView;
+  data: T[];
+  dataKey: keyof T;
   color: string;
   unit: string;
   gradientId: string;

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, BatteryCharging, LayoutGrid, Plug, Sparkles } from "lucide-react";
+import { ArrowLeft, LayoutGrid, MapPin, Plug, Sparkles } from "lucide-react";
 import { PageShell } from "@/components/layout/PageShell";
 import { Panel } from "@/components/ui/Panel";
 import { ApiErrorState } from "@/components/ui/ApiErrorState";
@@ -7,6 +7,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import { StatusDot } from "@/components/ui/StatusDot";
 import { HealthBar, healthColor } from "@/components/ui/HealthBar";
 import { RiskPill } from "@/components/ui/RiskPill";
+import { TelemetryChart } from "@/components/battery/TelemetryChart";
 import { CreateFieldActionButton } from "@/components/battery/CreateFieldActionButton";
 import { getStationDetail } from "@/lib/api/resources";
 import { formatScoredAt } from "@/lib/formatScoredAt";
@@ -34,12 +35,12 @@ export default async function StationDetailPage({
     );
   }
 
-  const { station, chargers, scoring } = data;
-  const faulty = chargers.filter((c) => c.faulty).length;
+  const { station, scoring, telemetry } = data;
   const scoredLabel = scoring ? formatScoredAt(scoring.scoredAt) : null;
+  const location = scoring?.location ?? station.name;
 
   return (
-    <PageShell title={station.stationId} subtitle={station.name}>
+    <PageShell title={station.stationId} subtitle={location}>
       <div className="flex flex-col gap-4">
         <Link
           href="/stations"
@@ -49,6 +50,10 @@ export default async function StationDetailPage({
           All stations
         </Link>
 
+        {/* Station overview — this station's own facts. Charger and battery
+            operational detail (online/offline, faulty, per-battery health)
+            lives on their own dedicated list pages, scoped to this station
+            via ?station=, rather than being duplicated here. */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
             icon={LayoutGrid}
@@ -57,11 +62,6 @@ export default async function StationDetailPage({
             label="Docks"
             value={station.dockCount}
             href={`/live-monitoring?station=${station.stationId}`}
-            breakdown={[
-              { label: "Healthy", value: station.healthyDocks, tone: "good" },
-              { label: "At risk", value: station.atRiskDocks, tone: "warning" },
-              { label: "Critical", value: station.criticalDocks, tone: "critical" },
-            ]}
           />
           <StatCard
             icon={Plug}
@@ -70,35 +70,34 @@ export default async function StationDetailPage({
             label="Chargers"
             value={station.chargersOnline + station.chargersOffline}
             href={`/chargers?station=${station.stationId}`}
-            breakdown={[
-              { label: "Online", value: station.chargersOnline, tone: "good" },
-              { label: "Offline", value: station.chargersOffline, tone: "critical" },
-              { label: "Faulty", value: faulty, tone: "warning" },
-            ]}
-          />
-          <StatCard
-            icon={BatteryCharging}
-            iconBg="color-mix(in srgb, var(--status-critical) 12%, transparent)"
-            iconColor="var(--status-critical)"
-            label="High Risk Docks"
-            value={station.highRiskDocks}
-            href={`/live-monitoring?station=${station.stationId}`}
           />
           <Panel>
-            <div className="text-[12px] text-text-muted">Station Status</div>
+            <div className="text-[12px] text-text-muted">Status</div>
             <div className="mt-1">
               <StatusDot status={station.online ? "ONLINE" : "OFFLINE"} />
             </div>
-            <div className="mt-4 text-[12px] text-text-muted">Average Dock Health</div>
+            <div className="mt-4 text-[12px] text-text-muted">Location</div>
+            <Link
+              href="/map-view"
+              className="mt-1 flex items-center gap-1.5 text-[13px] font-medium text-text-primary hover:text-[var(--series-1)] hover:underline"
+            >
+              <MapPin size={13} className="flex-none text-text-muted" />
+              {location}
+            </Link>
+          </Panel>
+          <Panel>
+            <div className="text-[12px] text-text-muted">Average Dock Health</div>
             <div className="mt-1">
               <HealthBar score={station.avgHealthScore} />
             </div>
+            <div className="mt-4 text-[12px] text-text-muted">Last Scored</div>
+            <div className="mt-1 text-[13px] font-medium text-text-primary">{scoredLabel ?? "Not available"}</div>
           </Panel>
         </div>
 
         {/* From GET /stations/{id} — same AI-scoring shape a battery's page
             shows. Degrades quietly (this whole block just doesn't render) if
-            that call fails; the dock/charger overview above still works. */}
+            that call fails; the overview above still works. */}
         {scoring && (
           <>
             <Panel>
@@ -204,30 +203,52 @@ export default async function StationDetailPage({
                 </dl>
               </Panel>
             </div>
-
-            <Panel title="Recommended Field Action">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <p className="text-[13px] text-text-secondary">
-                    <span className="font-semibold text-text-primary">{scoring.priority}</span> · {scoring.sla} ·{" "}
-                    {scoring.likelyIssue}
-                  </p>
-                  {scoring.suggestedChecks.length > 0 ? (
-                    <ol className="mt-3 ml-4 list-decimal space-y-1 text-[13px] text-text-secondary">
-                      {scoring.suggestedChecks.map((check) => (
-                        <li key={check}>{check}</li>
-                      ))}
-                    </ol>
-                  ) : (
-                    <p className="mt-2 text-[13px] text-text-muted">No checks suggested.</p>
-                  )}
-                </div>
-                <CreateFieldActionButton batteryId={station.stationId} sla={scoring.sla} priority={scoring.priority} />
-              </div>
-            </Panel>
           </>
         )}
 
+        {/* This platform has no station-level telemetry endpoint — only
+            per-dock (GET /assets/{id}/telemetry). This is the mean of every
+            dock at this station on each date (see aggregateStationTelemetry),
+            so it renders only when at least one dock's history resolved. */}
+        {telemetry.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Panel title="Average Dock Temperature" titleNote="(daily avg across docks, °C)">
+              <TelemetryChart data={telemetry} dataKey="temperature" color="var(--status-critical)" unit="°C" gradientId="station-temp" />
+            </Panel>
+            <Panel title="Average Charging Duration" titleNote="(daily avg across docks, seconds)">
+              <TelemetryChart data={telemetry} dataKey="chargingDuration" color="var(--series-1)" unit="s" gradientId="station-duration" />
+            </Panel>
+            <Panel title="Average Efficiency" titleNote="(daily avg across docks, %)">
+              <TelemetryChart data={telemetry} dataKey="efficiency" color="var(--status-good)" unit="%" gradientId="station-efficiency" />
+            </Panel>
+            <Panel title="Daily Alerts" titleNote="(total across docks)">
+              <TelemetryChart data={telemetry} dataKey="alertCount" color="var(--status-warning)" unit="alerts" gradientId="station-alerts" />
+            </Panel>
+          </div>
+        )}
+
+        {scoring && (
+          <Panel title="Recommended Field Action">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <p className="text-[13px] text-text-secondary">
+                  <span className="font-semibold text-text-primary">{scoring.priority}</span> · {scoring.sla} ·{" "}
+                  {scoring.likelyIssue}
+                </p>
+                {scoring.suggestedChecks.length > 0 ? (
+                  <ol className="mt-3 ml-4 list-decimal space-y-1 text-[13px] text-text-secondary">
+                    {scoring.suggestedChecks.map((check) => (
+                      <li key={check}>{check}</li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="mt-2 text-[13px] text-text-muted">No checks suggested.</p>
+                )}
+              </div>
+              <CreateFieldActionButton batteryId={station.stationId} sla={scoring.sla} priority={scoring.priority} />
+            </div>
+          </Panel>
+        )}
       </div>
     </PageShell>
   );

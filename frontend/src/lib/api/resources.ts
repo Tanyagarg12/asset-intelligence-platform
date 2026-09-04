@@ -27,6 +27,7 @@ import {
 } from "./client";
 import type { ApiBatteryCounts } from "./types";
 import {
+  aggregateStationTelemetry,
   mergeChargerDockRisk,
   mergeStationScore,
   normaliseAlert,
@@ -118,36 +119,56 @@ export function getStationsPage(): Promise<Loaded<StationsPageData>> {
 
 export interface StationDetailData {
   station: StationRow;
-  chargers: ChargerRow[];
   /** From GET /stations/{id} — the same AI-scoring detail a battery's page
    * shows (dimensions, signals, recommended checks). Null only if that call
    * itself fails; the rest of the page still renders from `station`. */
   scoring: StationDetailView | null;
+  /** Station-level daily trend — this platform has no station telemetry
+   * endpoint, so it's the mean of every dock at this station's own telemetry
+   * (see `aggregateStationTelemetry`). Empty if the dock register or every
+   * dock's telemetry call fails. */
+  telemetry: AssetTelemetryPointView[];
+}
+
+/** This platform's dock register (GET /assets) ids docks as
+ * "QIS-{station digits}-{dock digits}" — the same convention
+ * `deriveDockAssetId` builds one of; here every dock belonging to a station
+ * is found by that prefix instead, since the point is "all of them", not one. */
+function dockAssetIdsForStation(stationId: string, assets: { asset_id: string }[]): string[] {
+  const stationDigits = stationId.match(/(\d+)/)?.[1]?.padStart(3, "0");
+  if (!stationDigits) return [];
+  const prefix = `QIS-${stationDigits}-`;
+  return assets.filter((a) => a.asset_id.startsWith(prefix)).map((a) => a.asset_id);
 }
 
 /**
- * The dock/charger overview comes from the station list plus the charger
- * list filtered by station (there's no per-station dock breakdown any other
- * way); the AI-scoring section comes from the dedicated GET /stations/{id}.
- * Batteries still can't be listed per station until they carry a station_id.
+ * A station's own facts (dock/charger counts, status) come from GET
+ * /stations; its AI scoring from the dedicated GET /stations/{id}; its trend
+ * from averaging every one of its docks' own telemetry. Deliberately does not
+ * pull the charger or battery registers — those have their own list pages,
+ * scoped to this station via `?station=`, rather than being duplicated here.
  */
 export function getStationDetail(stationId: string): Promise<Loaded<StationDetailData>> {
   return load(async () => {
-    const [stations, chargers, scoring] = await Promise.all([
+    const [stations, scoring, assets] = await Promise.all([
       fetchStations(),
-      fetchChargers().catch(() => []),
       fetchStationDetail(stationId)
         .then(normaliseStationDetail)
         .catch(() => null),
+      fetchAssets().catch(() => []),
     ]);
     const match = stations.find((s) => s.station_id.toLowerCase() === stationId.toLowerCase());
     if (!match) throw new ApiUnavailableError(`Station ${stationId} was not found`, 404);
+
+    const dockAssetIds = dockAssetIdsForStation(stationId, assets);
+    const perDockTelemetry = await Promise.all(
+      dockAssetIds.map((assetId) => fetchAssetTelemetry(assetId, 14).catch(() => [])),
+    );
+
     return {
       station: normaliseStation(match),
-      chargers: chargers
-        .filter((c) => c.station_id.toLowerCase() === stationId.toLowerCase())
-        .map(normaliseCharger),
       scoring,
+      telemetry: aggregateStationTelemetry(perDockTelemetry.map(normaliseAssetTelemetry)),
     };
   });
 }
