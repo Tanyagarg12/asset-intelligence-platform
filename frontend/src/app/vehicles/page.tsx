@@ -9,7 +9,7 @@ export default function VehiclesPage() {
   const online = rows.filter((r) => r.online).length;
 
   return (
-    <PageShell title="Vehicles" subtitle={`${rows.length} vehicles · ${online} online — demo data`}>
+    <PageShell title="Vehicles (2W)" subtitle={`${rows.length} two-wheelers (2W) · ${online} online — demo data`}>
       <div className="flex flex-col gap-3">
         <DemoDataBanner />
         <Panel>

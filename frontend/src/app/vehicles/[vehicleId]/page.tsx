@@ -73,7 +73,12 @@ export default async function VehicleDetailPage({
               </div>
             </div>
             <div className="mt-4 text-[12px] text-text-muted">Model</div>
-            <div className="mt-1 text-[13px] font-medium text-text-primary">{vehicle.model}</div>
+            <div className="mt-1 text-[13px] font-medium text-text-primary">
+              {vehicle.model}
+              <span className="ml-1.5 rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-text-muted ring-1 ring-[var(--border-hairline)]">
+                {vehicle.vehicleType}
+              </span>
+            </div>
           </Panel>
           <Panel>
             <div className="flex items-center gap-2.5">

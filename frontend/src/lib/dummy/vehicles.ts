@@ -10,6 +10,13 @@
 // api/normalise.ts, and a loader in api/resources.ts that degrades honestly
 // instead of falling back to fiction.
 
+import { riskCategory, type PredictiveWarningRow } from "@/lib/api/normalise";
+
+// This fleet is two-wheelers (2W) only — SUN Mobility's swap network is
+// built around 2W/3W riders, and this demo register sticks to 2W to match
+// what "Vehicles" means everywhere else in this app.
+export const VEHICLE_TYPE = "2W" as const;
+
 export interface DummyVehicleDimension {
   key: string;
   label: string;
@@ -27,6 +34,7 @@ export interface DummyVehicleTelemetryPoint {
 
 export interface DummyVehicleRow {
   vehicleId: string;
+  vehicleType: typeof VEHICLE_TYPE;
   model: string;
   registration: string;
   stationId: string;
@@ -76,7 +84,7 @@ function seededRandom(seed: string): () => number {
 
 type Classification = "HEALTHY" | "WATCH" | "AT_RISK" | "CRITICAL";
 
-const MODELS = ["SUN E-3W CargoLite", "SUN E-2W Swift", "SUN E-3W Passenger", "SUN E-4W Van"];
+const MODELS = ["SUN E-2W Swift", "SUN E-2W Delivery Pro", "SUN E-2W CityRide", "SUN E-2W Max", "SUN E-2W Urban"];
 const DRIVERS = ["R. Kumar", "A. Sharma", "S. Reddy", "P. Singh", "M. Iyer", "N. Das", "V. Nair", "K. Joshi"];
 const STATIONS = ["QIS001", "QIS002", "QIS003", "QIS005", "QIS008", "QIS011", "QIS014", "QIS018"];
 const ISSUES: Record<Classification, string> = {
@@ -127,6 +135,7 @@ function buildRow(index: number): DummyVehicleRow {
 
   return {
     vehicleId,
+    vehicleType: VEHICLE_TYPE,
     model: MODELS[index % MODELS.length],
     registration: `KA-${String(1 + (index % 60)).padStart(2, "0")}-${String.fromCharCode(65 + (index % 26))}${String.fromCharCode(65 + ((index * 3) % 26))}-${1000 + index * 37}`,
     stationId: STATIONS[index % STATIONS.length],
@@ -214,4 +223,26 @@ export function getDummyVehicleDetail(vehicleId: string): DummyVehicleDetail | n
       "Demo data — this vehicle's score is fabricated for UI preview, not derived from any live telemetry.",
     telemetry,
   };
+}
+
+/** Feeds the demo fleet into the AI Predictions register alongside the
+ * platform's real predictive warnings — flagged per row via assetType
+ * "VEHICLE" (rendered "Vehicle (Demo)"), never blended in silently. */
+export function getDummyVehiclePredictiveWarnings(): PredictiveWarningRow[] {
+  return getDummyVehicles().map((v) => {
+    const detail = getDummyVehicleDetail(v.vehicleId)!;
+    return {
+      assetType: "VEHICLE",
+      assetId: v.vehicleId,
+      location: v.stationId,
+      riskScore: v.riskScore,
+      riskCategory: riskCategory(v.riskCategoryRaw),
+      riskCategoryRaw: v.riskCategoryRaw,
+      priority: v.priority,
+      likelyIssue: v.likelyIssue,
+      predictionWindow: detail.predictionWindow,
+      scoredAt: detail.scoredAt,
+      href: `/vehicles/${v.vehicleId}`,
+    };
+  });
 }

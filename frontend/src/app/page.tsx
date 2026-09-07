@@ -1,4 +1,4 @@
-import { BatteryCharging, Plug, Warehouse } from "lucide-react";
+import { BatteryCharging, Bike, Plug, Warehouse } from "lucide-react";
 import { PageShell } from "@/components/layout/PageShell";
 import { Panel } from "@/components/ui/Panel";
 import { StatCard, type RiskItem } from "@/components/ui/StatCard";
@@ -13,6 +13,13 @@ import { RiskSummaryPanel } from "@/components/dashboard/RiskSummaryPanel";
 import { TopAtRiskTable } from "@/components/dashboard/TopAtRiskTable";
 import { TopRiskAssets, type RankedAsset } from "@/components/dashboard/TopRiskAssets";
 import { getDashboardData } from "@/lib/api/dashboard";
+import { getDummyVehicles } from "@/lib/dummy/vehicles";
+
+/** HEALTHY is fine; WATCH/AT_RISK/CRITICAL all count as "needs attention" —
+ * same three-band grouping the Vehicles table itself filters by. */
+function vehicleNeedsAttention(classification: string): boolean {
+  return classification.toUpperCase() !== "HEALTHY";
+}
 
 /** A station's risk as a 0-100 figure, so every card ranks on one scale. */
 function stationRisk(highRisk: number, atRisk: number, docks: number): number {
@@ -108,13 +115,40 @@ export default async function DashboardPage({
     tag: row.priority,
   }));
 
+  // Demo data — this platform has no vehicle-telemetry service yet (see
+  // lib/dummy/vehicles.ts). Included so Vehicles shows up on the dashboard
+  // like every other asset type, flagged "Demo" everywhere it appears.
+  const vehicles = getDummyVehicles();
+  const vehiclesOnline = vehicles.filter((v) => v.online).length;
+  const vehiclesAtRisk = vehicles.filter((v) => vehicleNeedsAttention(v.healthClassification));
+  const vehicleItems: RiskItem[] = vehiclesAtRisk.map((v) => ({
+    id: v.vehicleId,
+    href: `/vehicles/${v.vehicleId}`,
+    detail: v.likelyIssue,
+    risk: v.riskScore,
+    tag: `${v.priority} · Demo`,
+  }));
+
+  topRiskAssets.push(
+    ...vehiclesAtRisk.map((v) => ({
+      id: v.vehicleId,
+      key: `vehicle-${v.vehicleId}`,
+      kind: "vehicle" as const,
+      href: `/vehicles/${v.vehicleId}`,
+      issue: v.likelyIssue,
+      location: v.stationId,
+      risk: v.riskScore,
+      tag: v.priority,
+    })),
+  );
+
   return (
-    <PageShell title="Dashboard" subtitle="Overview of Stations, Chargers & Batteries">
+    <PageShell title="Dashboard" subtitle="Overview of Stations, Chargers, Batteries & Vehicles">
       <div className="flex flex-col gap-3">
         <DataSourceBadge source={data.source} />
         <CriticalAlertBanner rows={data.atRisk} />
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
             icon={Warehouse}
             iconBg="color-mix(in srgb, var(--series-7) 12%, transparent)"
@@ -161,12 +195,27 @@ export default async function DashboardPage({
             items={batteryItems}
             emptyMessage="No battery above the Low risk band."
           />
+          <StatCard
+            icon={Bike}
+            iconBg="color-mix(in srgb, var(--series-5) 12%, transparent)"
+            iconColor="var(--series-5)"
+            label="Vehicles (2W) · Demo"
+            value={vehicles.length}
+            href="/vehicles"
+            breakdown={[
+              { label: "Online", value: vehiclesOnline, tone: "good" },
+              { label: "Offline", value: vehicles.length - vehiclesOnline, tone: "critical" },
+              { label: "Needs attention", value: vehiclesAtRisk.length, tone: "warning" },
+            ]}
+            items={vehicleItems}
+            emptyMessage="All demo vehicles healthy."
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
           <Panel
             title="Top Risk Assets"
-            titleNote="(all asset types)"
+            titleNote="(all asset types, incl. demo vehicles)"
             className="lg:col-span-7"
             action={<ViewAllLink href="/ai-predictions" />}
           >
