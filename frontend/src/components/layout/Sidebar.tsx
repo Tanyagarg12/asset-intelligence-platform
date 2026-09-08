@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
+import { SunMobilityLogo, SunMobilityWordmark } from "./SunMobilityLogo";
 import {
   Activity,
   BatteryCharging,
@@ -40,15 +40,9 @@ export function Sidebar({ alertCount }: { alertCount: number }) {
 
   return (
     <aside className="flex h-screen w-[212px] flex-none flex-col border-r border-[var(--border-hairline)] bg-[var(--surface-1)]">
-      <Link href="/" className="flex items-center px-5 py-5" aria-label="Circumcircle Innovations — dashboard">
-        <Image
-          src="/circumcircle-logo.png"
-          alt="Circumcircle Innovations"
-          width={312}
-          height={107}
-          className="h-9 w-auto"
-          priority
-        />
+      <Link href="/" className="flex items-center gap-2.5 px-5 py-5" aria-label="SUN MOBILITY — dashboard">
+        <SunMobilityLogo size={38} />
+        <SunMobilityWordmark />
       </Link>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
