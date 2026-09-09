@@ -187,10 +187,45 @@ export interface ApiStationScore {
   likely_issue: string;
   prediction_window: string;
   scored_at: string;
+  /** How many non-telemetry findings (GET /stations/{id}'s ai_insights) this
+   * station has — 0 when none apply. */
+  insight_count: number;
+  /** How much those insights pushed risk above the raw telemetry-only
+   * risk_score above; 0 when nothing escalated it. */
+  risk_uplift: number;
+  /** The "true" risk once insights are folded in — null when insight_count
+   * is 0 (nothing to fold in, so it equals risk_score/risk_category/priority
+   * anyway). This is the number to rank and colour by, not the raw one. */
+  composite_risk_score: number | null;
+  composite_risk_category: string | null;
+  composite_priority: string | null;
+  composite_prediction_window: string | null;
+  /** True when the composite figures above actually differ from the raw
+   * ones — i.e. an insight moved this station into a worse band. */
+  composite_escalated: boolean;
+  uplift_reasons: string[];
+}
+
+/** One non-telemetry finding attached to a station (GET /stations/{id}) —
+ * maintenance history, a seasonal climate projection, a regional
+ * connectivity rollup, etc. `basis` says where it came from so it's never
+ * mistaken for a measured deviation; `contributes_uplift` says whether it
+ * actually pushed the composite risk above the raw one. */
+export interface ApiAIInsight {
+  category: string;
+  label: string;
+  severity: string;
+  basis: string;
+  contributes_uplift: boolean;
+  headline: string;
+  detail: string | null;
+  recommended_action: string | null;
+  note: string | null;
 }
 
 /** GET /stations/{id} — the same AI-scoring shape as a battery's detail:
- * dimension scores, detected signals, and a recommended field action. */
+ * dimension scores, detected signals, and a recommended field action — plus
+ * the composite/insight fields ApiStationScore also carries. */
 export interface ApiStationDetail {
   station_id: string;
   location: string;
@@ -204,8 +239,18 @@ export interface ApiStationDetail {
   likely_issue: string;
   prediction_window: string;
   scored_at: string;
+  insight_count: number;
+  risk_uplift: number;
+  composite_risk_score: number | null;
+  composite_risk_category: string | null;
+  composite_priority: string | null;
+  composite_prediction_window: string | null;
+  composite_escalated: boolean;
+  uplift_reasons: string[];
   dimension_scores: Record<string, number>;
   detected_signals: string[];
+  ai_insights: ApiAIInsight[];
+  insight_signals: string[];
   sla: string;
   business_impact: string;
   suggested_checks: string[];
@@ -222,28 +267,17 @@ export interface ApiCharger {
   last_seen: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// Vehicles (2W EV) — served from a separate deployment (VEHICLE_API_BASE_URL)
-// that scores the fleet's electric two-wheelers; GET /vehicles · /vehicles/
-// summary · /vehicles/risk/top · /vehicles/{asset_id} · /vehicles/{asset_id}/
-// telemetry · /vehicles/{asset_id}/linkage.
-// ---------------------------------------------------------------------------
-
-/** One row of GET /vehicles or GET /vehicles/risk/top. */
-export interface ApiVehicleSummary {
-  asset_id: string;
-  asset_type: string | null;
-  asset_sub_type: string | null;
-  manufacturer: string | null;
-  model: string | null;
-  registration_number: string | null;
+/** One row of GET /chargers/scores or /chargers/risk/top — the charger's own
+ * real AI score, keyed by the fleet-unique `charger_uid` ("QIS018-CHG11")
+ * rather than the reused `charger_id`. */
+export interface ApiChargerScore {
+  charger_uid: string;
+  charger_id: string | null;
+  station_id: string | null;
+  dock_id: string | null;
   location: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  home_station_id: string | null;
-  status: string | null;
-  operational_status: string | null;
-  last_seen: string | null;
+  online: boolean;
+  faulty: boolean;
   health_score: number | null;
   health_classification: string | null;
   anomaly_score: number | null;
@@ -252,93 +286,50 @@ export interface ApiVehicleSummary {
   risk_category: string | null;
   priority: string | null;
   likely_issue: string | null;
-  likely_issue_code: string | null;
-  scenario_id: string | null;
-  confidence: number | null;
-  confidence_band: string | null;
   prediction_window: string | null;
   scored_at: string | null;
 }
 
-/** The vehicle's most recent single telemetry reading, embedded in
- * GET /vehicles/{asset_id}. */
-export interface ApiVehicleTelemetrySnapshot {
-  timestamp: string | null;
-  vehicle_status: string | null;
-  battery_soc: number | null;
-  battery_voltage: number | null;
-  battery_current: number | null;
-  battery_temperature: number | null;
-  motor_temperature: number | null;
-  motor_current: number | null;
-  motor_rpm: number | null;
-  vehicle_speed: number | null;
-  vehicle_odometer: number | null;
-  charging_status: string | null;
-  energy_consumption: number | null;
-  range_estimate: number | null;
-  gps_latitude: number | null;
-  gps_longitude: number | null;
-  connectivity_status: string | null;
-  error_code: string | null;
+/** Whichever battery is currently docked/charging at a charger, embedded in
+ * GET /chargers/{charger_uid}. */
+export interface ApiChargerCurrentBattery {
+  battery_id: string;
+  charger_status: string | null;
+  charging_soc_percent: number | null;
+  last_seen: string | null;
+  health_score: number | null;
+  health_classification: string | null;
 }
 
-/** GET /vehicles/{asset_id} — the 2W EV "Asset 360". */
-export interface ApiVehicleDetail extends ApiVehicleSummary {
-  dimension_scores: Record<string, number> | null;
-  detected_signals: string[];
-  sla: string | null;
-  business_impact: string | null;
-  recommended_action: string | null;
-  suggested_checks: string[];
-  risk_note: string | null;
-  latest_telemetry: ApiVehicleTelemetrySnapshot | null;
-  telemetry_profile: string[];
-}
-
-/** GET /vehicles/summary */
-export interface ApiVehicleFleetSummary {
-  total: number;
-  healthy: number;
-  watch: number;
-  at_risk: number;
-  critical: number;
-  offline: number;
-  high_risk_count: number;
-  predicted_failure_count: number;
-  average_health_score: number | null;
-  as_of: string | null;
-}
-
-/** One day of GET /vehicles/{asset_id}/telemetry — daily aggregates. */
-export interface ApiVehicleTelemetryPoint {
-  date: string | null;
-  battery_temperature_mean: number | null;
-  battery_temperature_max: number | null;
-  battery_soc_mean: number | null;
-  motor_temperature_mean: number | null;
-  motor_current_mean: number | null;
-  energy_consumption_total: number | null;
-  energy_per_km: number | null;
-  range_full_estimate: number | null;
-  distance_km: number | null;
-  vehicle_speed_mean: number | null;
-  connectivity_uptime: number | null;
-  reading_count: number | null;
-  error_count: number | null;
-}
-
-/** GET /vehicles/{asset_id}/linkage — where the vehicle is based and how
- * that station is itself scoring. `home_station` matches the shape of a
- * GET /stations/scores row (confirmed against a live response), though the
- * API declares it as a loose object. */
-export interface ApiVehicleLinkage {
-  asset_id: string;
-  home_station_id: string | null;
+/** GET /chargers/{charger_uid} — the charger's own "Asset 360": a native
+ * AI score (dimensions, signals, recommended checks) the same shape as a
+ * battery's or station's detail, keyed by the fleet-unique charger_uid
+ * ("QIS018-CHG11") rather than the reused charger_id. */
+export interface ApiChargerDetail {
+  charger_uid: string;
+  charger_id: string;
+  station_id: string;
+  dock_id: string;
   location: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  home_station: ApiStationScore | null;
+  online: boolean;
+  faulty: boolean;
+  health_score: number;
+  health_classification: string;
+  anomaly_score: number;
+  anomaly_severity: string;
+  risk_score: number;
+  risk_category: string;
+  priority: string;
+  likely_issue: string;
+  prediction_window: string;
+  scored_at: string;
+  dimension_scores: Record<string, number>;
+  detected_signals: string[];
+  sla: string;
+  business_impact: string;
+  suggested_checks: string[];
+  risk_note: string;
+  current_battery: ApiChargerCurrentBattery | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -382,15 +373,23 @@ export interface ApiAsset {
  * looks like "QIS-018-03"), but unlike /operations/predictive-warnings this
  * one carries `business_impact` and `scored_at`. No `sla` field exists here
  * — that is genuinely not something the platform scores for a dock/charger. */
+/** Predictive Operations screen row — one scored asset of ANY type.
+ * `asset_type` is STATION | CHARGER | DOCK | BATTERY, and `asset_id` is that
+ * type's own key (station_id, charger_uid "<station>-<charger>", dock
+ * asset_id, or battery_id). `station_id`/`location` are resolved for every
+ * type, so a row is dispatchable on its own. */
 export interface ApiOperationsRiskItem {
+  asset_type: string;
   asset_id: string;
-  location: string;
+  station_id: string | null;
+  location: string | null;
   risk_score: number;
   risk_category: string;
-  likely_issue: string;
-  business_impact: string;
+  likely_issue: string | null;
+  business_impact: string | null;
   priority: string;
-  scored_at: string;
+  prediction_window: string | null;
+  scored_at: string | null;
 }
 
 /** One row of GET /operations/predictive-warnings — spans every asset type

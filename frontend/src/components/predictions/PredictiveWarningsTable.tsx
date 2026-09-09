@@ -10,9 +10,6 @@ const TYPE_LABEL: Record<string, string> = {
   STATION: "Station",
   DOCK: "Dock",
   CHARGER: "Charger",
-  // Scored on a separate deployment (see vehicleApiBaseUrl), same as every
-  // other type here.
-  VEHICLE: "Vehicle",
 };
 
 export function PredictiveWarningsTable({ rows }: { rows: PredictiveWarningRow[] }) {

@@ -8,6 +8,7 @@
 //   - top_at_risk_batteries[].failure_in_hours-> row.failureInHours
 
 import type {
+  ApiAIInsight,
   ApiAlert,
   ApiAsset,
   ApiAssetTelemetryPoint,
@@ -18,14 +19,12 @@ import type {
   ApiCommandCenter,
   ApiHealthTrendPoint,
   ApiPredictiveWarning,
+  ApiChargerDetail,
+  ApiChargerScore,
+  ApiOperationsRiskItem,
   ApiStation,
   ApiStationDetail,
   ApiStationScore,
-  ApiVehicleDetail,
-  ApiVehicleFleetSummary,
-  ApiVehicleLinkage,
-  ApiVehicleSummary,
-  ApiVehicleTelemetryPoint,
 } from "./types";
 
 export type DataSource = "api" | "demo";
@@ -285,7 +284,10 @@ export interface StationRow {
   longitude: number | null;
   /** From the separate GET /stations/scores call — null until that call is
    * merged in (see `mergeStationScore`), so the register still renders
-   * without these columns if that fetch fails on its own. */
+   * without these columns if that fetch fails on its own. `riskScore`,
+   * `riskCategoryRaw` and `priority` are already the *composite* figures
+   * (raw risk folded together with any non-telemetry insight) when one
+   * applies — the "top", truest number, not the raw telemetry-only one. */
   healthClassification: string | null;
   anomalyScore: number | null;
   anomalySeverity: string | null;
@@ -293,22 +295,40 @@ export interface StationRow {
   riskCategoryRaw: string | null;
   priority: string | null;
   likelyIssue: string | null;
+  /** True when a non-telemetry insight (seasonal climate, regional
+   * connectivity, etc.) pushed the figures above beyond the raw
+   * telemetry-only score below. */
+  riskEscalated: boolean;
+  /** The raw, telemetry-only score/category — equal to riskScore/
+   * riskCategoryRaw above when nothing escalated it. */
+  baseRiskScore: number | null;
+  baseRiskCategoryRaw: string | null;
+  insightCount: number;
+  upliftReasons: string[];
 }
 
 /** Merges a GET /stations/scores row into a station's overview row — kept
  * separate from `normaliseStation` since the two come from different calls
- * that can succeed or fail independently. */
+ * that can succeed or fail independently. Prefers the composite risk figures
+ * over the raw ones whenever an insight actually applies (composite_risk_score
+ * non-null) — see StationRow's riskScore doc. */
 export function mergeStationScore(row: StationRow, score: ApiStationScore | undefined): StationRow {
   if (!score) return row;
+  const hasComposite = score.composite_risk_score !== null;
   return {
     ...row,
     healthClassification: score.health_classification,
     anomalyScore: score.anomaly_score,
     anomalySeverity: score.anomaly_severity,
-    riskScore: score.risk_score,
-    riskCategoryRaw: score.risk_category,
-    priority: score.priority,
+    riskScore: hasComposite ? score.composite_risk_score : score.risk_score,
+    riskCategoryRaw: hasComposite ? (score.composite_risk_category ?? score.risk_category) : score.risk_category,
+    priority: hasComposite ? (score.composite_priority ?? score.priority) : score.priority,
     likelyIssue: score.likely_issue,
+    riskEscalated: score.composite_escalated,
+    baseRiskScore: score.risk_score,
+    baseRiskCategoryRaw: score.risk_category,
+    insightCount: score.insight_count,
+    upliftReasons: score.uplift_reasons,
   };
 }
 
@@ -396,6 +416,11 @@ export function normaliseStation(row: ApiStation): StationRow {
     riskCategoryRaw: null,
     priority: null,
     likelyIssue: null,
+    riskEscalated: false,
+    baseRiskScore: null,
+    baseRiskCategoryRaw: null,
+    insightCount: 0,
+    upliftReasons: [],
   };
 }
 
@@ -418,9 +443,11 @@ export function normaliseCharger(row: ApiCharger): ChargerRow {
   };
 }
 
-/** Merges the dock's own AI scoring into a charger row — there is no
- * per-charger scoring endpoint, so this is the closest real substitute (see
- * `deriveDockAssetId` in resources.ts for how the dock is found). */
+/** Merges the dock's own AI scoring into a charger row — kept for the
+ * Chargers list/detail pages (see `deriveDockAssetId` in resources.ts). The
+ * platform now also exposes a real per-charger score directly (GET
+ * /chargers/scores, see `mergeChargerScore` below) — this dock-derived path
+ * predates that and is a candidate to retire in a future pass. */
 export function mergeChargerDockRisk(row: ChargerRow, asset: ApiAsset | undefined): ChargerRow {
   if (!asset) return row;
   return {
@@ -436,10 +463,46 @@ export function mergeChargerDockRisk(row: ChargerRow, asset: ApiAsset | undefine
   };
 }
 
-/** GET /stations/{id} — same AI-scoring shape as a battery's detail. */
-export interface StationDetailView {
+/** Merges the charger's own real AI score (GET /chargers/scores) into a
+ * charger row — keyed by the fleet-unique charger_uid
+ * ("<station_id>-<charger_id>"), not the reused charger_id alone. */
+export function mergeChargerScore(row: ChargerRow, score: ApiChargerScore | undefined): ChargerRow {
+  if (!score) return row;
+  return {
+    ...row,
+    healthScore: score.health_score,
+    healthClassification: score.health_classification,
+    anomalyScore: score.anomaly_score,
+    anomalySeverity: score.anomaly_severity,
+    riskScore: score.risk_score,
+    riskCategoryRaw: score.risk_category,
+    priority: score.priority,
+    likelyIssue: score.likely_issue,
+  };
+}
+
+/** Whichever battery is currently docked/charging at a charger — embedded in
+ * GET /chargers/{charger_uid}, absent when the dock is empty. */
+export interface ChargerCurrentBatteryView {
+  batteryId: string;
+  chargerStatus: string | null;
+  chargingSocPercent: number | null;
+  lastSeen: string | null;
+  healthScore: number | null;
+  healthClassification: string | null;
+}
+
+/** GET /chargers/{charger_uid} — the charger's own "Asset 360", the same
+ * AI-scoring shape as a battery's or station's detail (dimensions, signals,
+ * recommended checks), plus whichever battery is currently charging there. */
+export interface ChargerDetailView {
+  chargerUid: string;
+  chargerId: string;
   stationId: string;
-  location: string;
+  dockId: string;
+  location: string | null;
+  online: boolean;
+  faulty: boolean;
   healthScore: number;
   healthClassification: string;
   anomalyScore: number;
@@ -457,12 +520,18 @@ export interface StationDetailView {
   businessImpact: string;
   suggestedChecks: string[];
   riskNote: string;
+  currentBattery: ChargerCurrentBatteryView | null;
 }
 
-export function normaliseStationDetail(detail: ApiStationDetail): StationDetailView {
+export function normaliseChargerDetail(detail: ApiChargerDetail): ChargerDetailView {
   return {
+    chargerUid: detail.charger_uid,
+    chargerId: detail.charger_id,
     stationId: detail.station_id,
+    dockId: detail.dock_id,
     location: detail.location,
+    online: detail.online,
+    faulty: detail.faulty,
     healthScore: detail.health_score,
     healthClassification: detail.health_classification,
     anomalyScore: detail.anomaly_score,
@@ -480,6 +549,223 @@ export function normaliseStationDetail(detail: ApiStationDetail): StationDetailV
       score,
     })),
     detectedSignals: detail.detected_signals ?? [],
+    sla: detail.sla,
+    businessImpact: detail.business_impact,
+    suggestedChecks: detail.suggested_checks ?? [],
+    riskNote: detail.risk_note,
+    currentBattery: detail.current_battery
+      ? {
+          batteryId: detail.current_battery.battery_id,
+          chargerStatus: detail.current_battery.charger_status,
+          chargingSocPercent: detail.current_battery.charging_soc_percent,
+          lastSeen: detail.current_battery.last_seen,
+          healthScore: detail.current_battery.health_score,
+          healthClassification: detail.current_battery.health_classification,
+        }
+      : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// GET /operations/risk — the Predictive Operations screen's own risk list,
+// one row per dock ("QIS-018-03"), carrying business_impact and a location
+// string ("City, State") the per-type score endpoints don't. Used as the
+// single risk source for the Dashboard's Top Risk Assets and the Map View,
+// so both screens agree with each other and with the Predictive Operations
+// screen itself.
+// ---------------------------------------------------------------------------
+
+export interface OperationsRiskRow {
+  assetType: string;
+  assetId: string;
+  /** The API's own station_id, resolved for every type (not parsed) — null
+   * only for the rare row the platform itself couldn't resolve one for. */
+  stationId: string | null;
+  /** Parsed from a DOCK-type asset id ("QIS-018-03" -> "D03") — null for
+   * every other asset_type, or if the id doesn't match that shape. */
+  dockId: string | null;
+  location: string | null;
+  riskScore: number;
+  riskCategoryRaw: string;
+  likelyIssue: string | null;
+  businessImpact: string | null;
+  priority: string;
+  predictionWindow: string | null;
+  scoredAt: string | null;
+}
+
+/** DOCK-type asset ids look like "QIS-018-03" — this pulls just the dock
+ * number back out ("D03"), matching the format the charger register uses. */
+function parseDockId(assetId: string): string | null {
+  const match = assetId.match(/^QIS-\d+-(\d+)$/i);
+  return match ? `D${match[1]}` : null;
+}
+
+export function normaliseOperationsRisk(row: ApiOperationsRiskItem): OperationsRiskRow {
+  return {
+    assetType: row.asset_type,
+    assetId: row.asset_id,
+    stationId: row.station_id,
+    dockId: row.asset_type.toUpperCase() === "DOCK" ? parseDockId(row.asset_id) : null,
+    location: row.location,
+    riskScore: row.risk_score,
+    riskCategoryRaw: row.risk_category,
+    likelyIssue: row.likely_issue,
+    businessImpact: row.business_impact,
+    priority: row.priority,
+    predictionWindow: row.prediction_window,
+    scoredAt: row.scored_at,
+  };
+}
+
+/** Where a GET /operations/risk row's own page lives — DOCK has none, so it
+ * falls back to the parent station (its station_id is always resolved). */
+export function operationsRiskHref(row: OperationsRiskRow): string | null {
+  switch (row.assetType.toUpperCase()) {
+    case "BATTERY":
+      return `/batteries/${row.assetId}`;
+    case "STATION":
+      return `/stations/${row.assetId}`;
+    case "CHARGER": {
+      // charger_uid is "<station_id>-<charger_id>" — both halves are
+      // themselves hyphen-free, so this split is exact.
+      const chargerId = row.stationId ? row.assetId.slice(row.stationId.length + 1) : null;
+      return chargerId && row.stationId ? `/chargers/${chargerId}?station=${row.stationId}` : null;
+    }
+    case "DOCK":
+      return row.stationId ? `/stations/${row.stationId}` : null;
+    default:
+      return null;
+  }
+}
+
+/** Merges a station's own native risk (GET /operations/risk?asset_type=
+ * STATION — identical to GET /stations/scores) into its row, so this figure
+ * always matches what the station's own detail/list page shows rather than
+ * a dock-derived proxy. */
+export function mergeStationOperationsRisk(row: StationRow, risk: OperationsRiskRow | undefined): StationRow {
+  if (!risk) return row;
+  return {
+    ...row,
+    riskScore: risk.riskScore,
+    riskCategoryRaw: risk.riskCategoryRaw,
+    priority: risk.priority,
+    likelyIssue: risk.likelyIssue,
+  };
+}
+
+/** Merges a charger's own native risk (GET /operations/risk?asset_type=
+ * CHARGER — identical to GET /chargers/scores) into its row, keyed by
+ * charger_uid — not the dock it sits on, which can score differently. */
+export function mergeChargerOperationsRisk(row: ChargerRow, risk: OperationsRiskRow | undefined): ChargerRow {
+  if (!risk) return row;
+  return {
+    ...row,
+    riskScore: risk.riskScore,
+    riskCategoryRaw: risk.riskCategoryRaw,
+    priority: risk.priority,
+    likelyIssue: risk.likelyIssue,
+  };
+}
+
+/** GET /stations/{id} — same AI-scoring shape as a battery's detail. */
+/** One non-telemetry finding on a station's detail (GET /stations/{id}) —
+ * see ApiAIInsight. */
+export interface AIInsightView {
+  category: string;
+  label: string;
+  severity: string;
+  basis: string;
+  contributesUplift: boolean;
+  headline: string;
+  detail: string | null;
+  recommendedAction: string | null;
+  note: string | null;
+}
+
+function normaliseAIInsight(insight: ApiAIInsight): AIInsightView {
+  return {
+    category: insight.category,
+    label: insight.label,
+    severity: insight.severity,
+    basis: insight.basis,
+    contributesUplift: insight.contributes_uplift,
+    headline: insight.headline,
+    detail: insight.detail,
+    recommendedAction: insight.recommended_action,
+    note: insight.note,
+  };
+}
+
+export interface StationDetailView {
+  stationId: string;
+  location: string;
+  healthScore: number;
+  healthClassification: string;
+  anomalyScore: number;
+  anomalySeverity: string;
+  /** The composite figures (raw risk folded together with any non-telemetry
+   * insight below) when one applies — the "top", truest number. */
+  riskScore: number;
+  riskCategory: RiskCategory;
+  riskCategoryRaw: string;
+  priority: string;
+  likelyIssue: string;
+  predictionWindow: string;
+  scoredAt: string;
+  /** True when aiInsights below actually pushed the figures above beyond
+   * the raw telemetry-only score. */
+  riskEscalated: boolean;
+  baseRiskScore: number;
+  baseRiskCategoryRaw: string;
+  upliftReasons: string[];
+  dimensions: { key: string; label: string; score: number }[];
+  detectedSignals: string[];
+  /** Non-telemetry findings — maintenance history, seasonal climate
+   * projections, regional connectivity rollups. Empty when none apply. */
+  aiInsights: AIInsightView[];
+  insightSignals: string[];
+  sla: string;
+  businessImpact: string;
+  suggestedChecks: string[];
+  riskNote: string;
+}
+
+export function normaliseStationDetail(detail: ApiStationDetail): StationDetailView {
+  const hasComposite = detail.composite_risk_score !== null;
+  return {
+    stationId: detail.station_id,
+    location: detail.location,
+    healthScore: detail.health_score,
+    healthClassification: detail.health_classification,
+    anomalyScore: detail.anomaly_score,
+    anomalySeverity: detail.anomaly_severity,
+    riskScore: hasComposite ? (detail.composite_risk_score as number) : detail.risk_score,
+    riskCategory: riskCategory(hasComposite ? (detail.composite_risk_category ?? detail.risk_category) : detail.risk_category),
+    riskCategoryRaw: hasComposite ? (detail.composite_risk_category ?? detail.risk_category) : detail.risk_category,
+    priority: hasComposite ? (detail.composite_priority ?? detail.priority) : detail.priority,
+    likelyIssue: detail.likely_issue,
+    predictionWindow: hasComposite ? (detail.composite_prediction_window ?? detail.prediction_window) : detail.prediction_window,
+    scoredAt: detail.scored_at,
+    riskEscalated: detail.composite_escalated,
+    baseRiskScore: detail.risk_score,
+    baseRiskCategoryRaw: detail.risk_category,
+    upliftReasons: detail.uplift_reasons ?? [],
+    dimensions: Object.entries(detail.dimension_scores ?? {}).map(([key, score]) => ({
+      key,
+      label: dimensionLabel(key),
+      score,
+    })),
+    detectedSignals: detail.detected_signals ?? [],
+    // "telemetry_risk" insights just restate the base risk_score/
+    // likely_issue/prediction_window already shown above and in Detected
+    // Signals — dropped here so Additional AI Insights only ever shows
+    // genuine non-telemetry findings (maintenance history, seasonal climate,
+    // regional connectivity, etc.), for every asset this ever applies to.
+    aiInsights: (detail.ai_insights ?? [])
+      .filter((insight) => insight.category !== "telemetry_risk")
+      .map(normaliseAIInsight),
+    insightSignals: detail.insight_signals ?? [],
     sla: detail.sla,
     businessImpact: detail.business_impact,
     suggestedChecks: detail.suggested_checks ?? [],
@@ -646,228 +932,4 @@ export function normaliseDistribution(dist: ApiHealthDistribution): Bucket[] {
     count: bucket?.count ?? 0,
     pct: bucket?.percent ?? 0,
   }));
-}
-
-// ---------------------------------------------------------------------------
-// Vehicles (2W EV) — GET /vehicles and friends, on VEHICLE_API_BASE_URL.
-// ---------------------------------------------------------------------------
-
-export interface VehicleRow {
-  vehicleId: string;
-  model: string;
-  manufacturer: string | null;
-  registration: string | null;
-  vehicleType: string;
-  stationId: string | null;
-  location: string | null;
-  online: boolean;
-  operationalStatus: string | null;
-  lastSeen: string | null;
-  healthScore: number | null;
-  healthClassification: string | null;
-  anomalyScore: number | null;
-  anomalySeverity: string | null;
-  riskScore: number | null;
-  riskCategoryRaw: string | null;
-  priority: string | null;
-  likelyIssue: string | null;
-  predictionWindow: string | null;
-  scoredAt: string | null;
-}
-
-/** OFFLINE/INACTIVE read as not-online; every other operational status
- * (RUNNING, CHARGING, IDLE, …) counts as online. */
-function vehicleIsOnline(status: string | null): boolean {
-  if (!status) return false;
-  const s = status.toUpperCase();
-  return s !== "OFFLINE" && s !== "INACTIVE";
-}
-
-export function normaliseVehicle(row: ApiVehicleSummary): VehicleRow {
-  return {
-    vehicleId: row.asset_id,
-    model: row.model ?? row.asset_id,
-    manufacturer: row.manufacturer,
-    registration: row.registration_number,
-    vehicleType: row.asset_sub_type ?? "2W",
-    stationId: row.home_station_id,
-    location: row.location,
-    online: vehicleIsOnline(row.operational_status ?? row.status),
-    operationalStatus: row.operational_status,
-    lastSeen: row.last_seen,
-    healthScore: row.health_score,
-    healthClassification: row.health_classification,
-    anomalyScore: row.anomaly_score,
-    anomalySeverity: row.anomaly_severity,
-    riskScore: row.risk_score,
-    riskCategoryRaw: row.risk_category,
-    priority: row.priority,
-    likelyIssue: row.likely_issue,
-    predictionWindow: row.prediction_window,
-    scoredAt: row.scored_at,
-  };
-}
-
-export interface VehicleDimension {
-  key: string;
-  label: string;
-  score: number;
-}
-
-export interface VehicleLatestTelemetry {
-  timestamp: string | null;
-  status: string | null;
-  batterySoc: number | null;
-  batteryVoltage: number | null;
-  batteryTemperature: number | null;
-  motorTemperature: number | null;
-  vehicleSpeed: number | null;
-  odometerKm: number | null;
-  chargingStatus: string | null;
-  energyConsumption: number | null;
-  rangeEstimateKm: number | null;
-  connectivityStatus: string | null;
-  errorCode: string | null;
-}
-
-export interface VehicleDetailView extends VehicleRow {
-  dimensions: VehicleDimension[];
-  detectedSignals: string[];
-  sla: string | null;
-  businessImpact: string | null;
-  recommendedAction: string | null;
-  suggestedChecks: string[];
-  riskNote: string | null;
-  latestTelemetry: VehicleLatestTelemetry | null;
-}
-
-export function normaliseVehicleDetail(detail: ApiVehicleDetail): VehicleDetailView {
-  const t = detail.latest_telemetry;
-  return {
-    ...normaliseVehicle(detail),
-    dimensions: Object.entries(detail.dimension_scores ?? {}).map(([key, score]) => ({
-      key,
-      label: dimensionLabel(key),
-      score,
-    })),
-    detectedSignals: detail.detected_signals ?? [],
-    sla: detail.sla,
-    businessImpact: detail.business_impact,
-    recommendedAction: detail.recommended_action,
-    suggestedChecks: detail.suggested_checks ?? [],
-    riskNote: detail.risk_note,
-    latestTelemetry: t
-      ? {
-          timestamp: t.timestamp,
-          status: t.vehicle_status,
-          batterySoc: t.battery_soc,
-          batteryVoltage: t.battery_voltage,
-          batteryTemperature: t.battery_temperature,
-          motorTemperature: t.motor_temperature,
-          vehicleSpeed: t.vehicle_speed,
-          odometerKm: t.vehicle_odometer,
-          chargingStatus: t.charging_status,
-          energyConsumption: t.energy_consumption,
-          rangeEstimateKm: t.range_estimate,
-          connectivityStatus: t.connectivity_status,
-          errorCode: t.error_code,
-        }
-      : null,
-  };
-}
-
-export interface VehicleFleetSummaryView {
-  total: number;
-  healthy: number;
-  watch: number;
-  atRisk: number;
-  critical: number;
-  offline: number;
-  highRiskCount: number;
-  predictedFailureCount: number;
-  averageHealthScore: number | null;
-  asOf: string | null;
-}
-
-export function normaliseVehicleFleetSummary(s: ApiVehicleFleetSummary): VehicleFleetSummaryView {
-  return {
-    total: s.total,
-    healthy: s.healthy,
-    watch: s.watch,
-    atRisk: s.at_risk,
-    critical: s.critical,
-    offline: s.offline,
-    highRiskCount: s.high_risk_count,
-    predictedFailureCount: s.predicted_failure_count,
-    averageHealthScore: s.average_health_score,
-    asOf: s.as_of,
-  };
-}
-
-/** One day of a vehicle's telemetry trend — same shape family as
- * AssetTelemetryPointView, kept separate since the underlying fields (EV
- * battery/motor telemetry) don't line up with a QIS dock's. */
-export interface VehicleTelemetryPointView {
-  date: string;
-  batteryTemp: number | null;
-  motorTemp: number | null;
-  energyPerKm: number | null;
-  distanceKm: number | null;
-  avgSpeed: number | null;
-  connectivityUptime: number | null;
-  errorCount: number | null;
-}
-
-export function normaliseVehicleTelemetry(points: ApiVehicleTelemetryPoint[]): VehicleTelemetryPointView[] {
-  return points
-    .filter((p): p is ApiVehicleTelemetryPoint & { date: string } => Boolean(p.date))
-    .map((p) => ({
-      date: p.date,
-      batteryTemp: p.battery_temperature_mean,
-      motorTemp: p.motor_temperature_mean,
-      energyPerKm: p.energy_per_km,
-      distanceKm: p.distance_km,
-      avgSpeed: p.vehicle_speed_mean,
-      connectivityUptime: p.connectivity_uptime,
-      errorCount: p.error_count,
-    }));
-}
-
-export interface VehicleHomeStation {
-  stationId: string;
-  healthScore: number;
-  healthClassification: string;
-  riskScore: number;
-  riskCategoryRaw: string;
-  priority: string;
-  likelyIssue: string;
-}
-
-export interface VehicleLinkageView {
-  stationId: string | null;
-  location: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  homeStation: VehicleHomeStation | null;
-}
-
-export function normaliseVehicleLinkage(l: ApiVehicleLinkage): VehicleLinkageView {
-  const hs = l.home_station;
-  return {
-    stationId: l.home_station_id,
-    location: l.location,
-    latitude: l.latitude,
-    longitude: l.longitude,
-    homeStation: hs
-      ? {
-          stationId: hs.station_id,
-          healthScore: hs.health_score,
-          healthClassification: hs.health_classification,
-          riskScore: hs.risk_score,
-          riskCategoryRaw: hs.risk_category,
-          priority: hs.priority,
-          likelyIssue: hs.likely_issue,
-        }
-      : null,
-  };
 }

@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { SunMobilityLogo, SunMobilityWordmark } from "./SunMobilityLogo";
 import {
   Activity,
   BatteryCharging,
   Bell,
-  Bike,
   LayoutGrid,
   Map,
   Plug,
@@ -32,7 +31,6 @@ export function Sidebar({ alertCount }: { alertCount: number }) {
     { href: "/stations", label: "Stations", icon: Warehouse },
     { href: "/chargers", label: "Chargers", icon: Plug },
     { href: "/batteries", label: "Batteries", icon: BatteryCharging },
-    { href: "/vehicles", label: "Vehicles (2W)", icon: Bike },
     { href: "/ai-predictions", label: "AI Predictions", icon: Sparkles },
     { href: "/alerts", label: "Alerts", icon: Bell, badge: alertCount },
     { href: "/map-view", label: "Map View", icon: Map },
@@ -40,9 +38,15 @@ export function Sidebar({ alertCount }: { alertCount: number }) {
 
   return (
     <aside className="flex h-screen w-[212px] flex-none flex-col border-r border-[var(--border-hairline)] bg-[var(--surface-1)]">
-      <Link href="/" className="flex items-center gap-2.5 px-5 py-5" aria-label="SUN MOBILITY — dashboard">
-        <SunMobilityLogo size={38} />
-        <SunMobilityWordmark />
+      <Link href="/" className="flex items-center px-5 py-5" aria-label="SUN MOBILITY — dashboard">
+        <Image
+          src="/sun-mobility-logo.png"
+          alt="SUN MOBILITY"
+          width={201}
+          height={83}
+          className="h-14 w-auto"
+          priority
+        />
       </Link>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">

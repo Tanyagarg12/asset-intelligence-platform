@@ -22,15 +22,12 @@ import type {
   ApiOperationsRiskItem,
   ApiPredictiveWarning,
   ApiRiskSummary,
+  ApiChargerDetail,
+  ApiChargerScore,
   ApiStation,
   ApiStationDetail,
   ApiStationScore,
   ApiStationSummary,
-  ApiVehicleDetail,
-  ApiVehicleFleetSummary,
-  ApiVehicleLinkage,
-  ApiVehicleSummary,
-  ApiVehicleTelemetryPoint,
 } from "./types";
 
 // The service is deployed on a platform that cold-starts, so first requests can
@@ -51,16 +48,6 @@ const REVALIDATE_SECONDS = 30;
 
 export function apiBaseUrl(): string | null {
   const raw = process.env.API_BASE_URL?.trim();
-  if (!raw) return null;
-  return raw.replace(/\/+$/, "");
-}
-
-/** The vehicle-scoring endpoints (§18/§19's 2W EV Asset 360) live on a
- * separate deployment from the rest of this platform, so they get their own
- * base URL and their own "not configured" message rather than silently
- * reusing (or being silently blocked by) API_BASE_URL. */
-export function vehicleApiBaseUrl(): string | null {
-  const raw = process.env.VEHICLE_API_BASE_URL?.trim();
   if (!raw) return null;
   return raw.replace(/\/+$/, "");
 }
@@ -103,14 +90,6 @@ async function requestJson<T>(base: string, path: string): Promise<T> {
 async function getJson<T>(path: string): Promise<T> {
   const base = apiBaseUrl();
   if (!base) throw new ApiUnavailableError("The monitoring service address is not configured");
-  return requestJson<T>(base, path);
-}
-
-/** Same as getJson, but against VEHICLE_API_BASE_URL — the vehicle-scoring
- * endpoints are a separate deployment (see vehicleApiBaseUrl). */
-async function getVehicleJson<T>(path: string): Promise<T> {
-  const base = vehicleApiBaseUrl();
-  if (!base) throw new ApiUnavailableError("The vehicle monitoring service address is not configured");
   return requestJson<T>(base, path);
 }
 
@@ -200,28 +179,15 @@ export const fetchChargers = cache(
     getJson<ApiCharger[]>(ENDPOINTS.chargers()),
 );
 
-// --- Vehicles (2W EV) — a separate deployment, see vehicleApiBaseUrl ---
-
-export const fetchVehicles = cache(
-  (p: { classification?: string; riskCategory?: string } = {}): Promise<ApiVehicleSummary[]> =>
-    getVehicleJson<ApiVehicleSummary[]>(ENDPOINTS.vehicles(p)),
+/** The charger's own real AI score (health/anomaly/risk), one call for the
+ * whole fleet — see ApiChargerScore. */
+export const fetchChargerScores = cache(
+  (): Promise<ApiChargerScore[]> => getJson<ApiChargerScore[]>(ENDPOINTS.chargersScores()),
 );
 
-export const fetchVehiclesSummary = cache(
-  (): Promise<ApiVehicleFleetSummary> => getVehicleJson<ApiVehicleFleetSummary>(ENDPOINTS.vehiclesSummary()),
-);
-
-export const fetchVehicle = cache(
-  (assetId: string): Promise<ApiVehicleDetail> => getVehicleJson<ApiVehicleDetail>(ENDPOINTS.vehicle(assetId)),
-);
-
-export const fetchVehicleTelemetry = cache(
-  (assetId: string, days = 14): Promise<ApiVehicleTelemetryPoint[]> =>
-    getVehicleJson<ApiVehicleTelemetryPoint[]>(ENDPOINTS.vehicleTelemetry(assetId, days)),
-);
-
-export const fetchVehicleLinkage = cache(
-  (assetId: string): Promise<ApiVehicleLinkage> => getVehicleJson<ApiVehicleLinkage>(ENDPOINTS.vehicleLinkage(assetId)),
+/** The charger's own "Asset 360" — see ApiChargerDetail. */
+export const fetchChargerDetail = cache(
+  (chargerUid: string): Promise<ApiChargerDetail> => getJson<ApiChargerDetail>(ENDPOINTS.chargerDetail(chargerUid)),
 );
 
 export const fetchHealthDistribution = cache(
@@ -257,11 +223,21 @@ export const fetchAssetTelemetry = cache(
     getJson<ApiAssetTelemetryPoint[]>(ENDPOINTS.assetTelemetry(assetId, days)),
 );
 
-/** Dock/charger risk list — carries `business_impact` and `scored_at`, which
- * GET /operations/predictive-warnings and GET /assets don't. */
+/** Cross-asset-type risk list (stations, chargers, docks, batteries) —
+ * carries `business_impact`, which GET /operations/predictive-warnings and
+ * GET /assets don't. Defaults to the API's own defaults (limit 10, balanced
+ * mix) — pass `assetType` + a large `limit` for the full single-type list
+ * (see ENDPOINTS.operationsRisk). */
 export const fetchOperationsRisk = cache(
-  (sortBy = "risk", order: "asc" | "desc" = "desc"): Promise<ApiOperationsRiskItem[]> =>
-    getJson<ApiOperationsRiskItem[]>(ENDPOINTS.operationsRisk(sortBy, order)),
+  (
+    p: {
+      sortBy?: string;
+      order?: "asc" | "desc";
+      limit?: number;
+      assetType?: string;
+      mix?: "balanced" | "strict";
+    } = {},
+  ): Promise<ApiOperationsRiskItem[]> => getJson<ApiOperationsRiskItem[]>(ENDPOINTS.operationsRisk(p)),
 );
 
 // --- Demo controls -------------------------------------------------------

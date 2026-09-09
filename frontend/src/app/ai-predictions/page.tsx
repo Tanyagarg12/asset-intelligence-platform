@@ -4,26 +4,18 @@ import { Panel } from "@/components/ui/Panel";
 import { ApiErrorState } from "@/components/ui/ApiErrorState";
 import { StatCard } from "@/components/ui/StatCard";
 import { PredictiveWarningsTable } from "@/components/predictions/PredictiveWarningsTable";
-import { getPredictiveWarningsPage, getVehiclePredictiveWarnings } from "@/lib/api/resources";
+import { getPredictiveWarningsPage } from "@/lib/api/resources";
 
 export default async function AiPredictionsPage() {
-  const [{ data: liveRows, error }, vehicleRows] = await Promise.all([
-    getPredictiveWarningsPage(),
-    getVehiclePredictiveWarnings(),
-  ]);
+  const { data: rows, error } = await getPredictiveWarningsPage();
 
-  if (error || !liveRows) {
+  if (error || !rows) {
     return (
       <PageShell title="AI Predictions" subtitle="Predictive risk register">
         <ApiErrorState title="Could not load predictive warnings" error={error ?? "Unknown error"} />
       </PageShell>
     );
   }
-
-  // Vehicles are scored on a separate deployment (see vehicleApiBaseUrl) and
-  // merged in here so they show up like every other asset type — tagged
-  // "Vehicle" in the Type column (see PredictiveWarningsTable).
-  const rows = [...liveRows, ...vehicleRows];
 
   const critical = rows.filter((r) => r.riskCategory === "CRITICAL").length;
   const highRisk = rows.filter((r) => r.riskCategory === "HIGH" || r.riskCategory === "CRITICAL").length;
@@ -71,7 +63,7 @@ export default async function AiPredictionsPage() {
             <span className="font-semibold text-text-primary">Predictive Risk / Early Warning.</span> These
             scores express the likelihood of an operational issue developing inside the prediction window,
             based on recent telemetry trends — across every asset type the platform scores (batteries,
-            stations, docks, chargers and 2W vehicles). They are not confirmed failure predictions.
+            stations, docks and chargers). They are not confirmed failure predictions.
           </p>
         </div>
       </div>

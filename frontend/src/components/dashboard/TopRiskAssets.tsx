@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { BatteryCharging, Bike, ChevronRight, Plug, Warehouse } from "lucide-react";
+import { BatteryCharging, ChevronRight, LayoutGrid, Plug, Warehouse } from "lucide-react";
 
-export type AssetKind = "battery" | "charger" | "station" | "vehicle";
+export type AssetKind = "battery" | "charger" | "station" | "dock";
 
 export interface RankedAsset {
   id: string;
@@ -35,9 +35,9 @@ const KIND_STYLE: Record<AssetKind, { icon: typeof Plug; label: string; color: s
     color: "var(--series-7)",
     bg: "color-mix(in srgb, var(--series-7) 12%, transparent)",
   },
-  vehicle: {
-    icon: Bike,
-    label: "Vehicle",
+  dock: {
+    icon: LayoutGrid,
+    label: "Dock",
     color: "var(--series-5)",
     bg: "color-mix(in srgb, var(--series-5) 12%, transparent)",
   },
