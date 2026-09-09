@@ -50,6 +50,21 @@ export const ENDPOINTS = {
   chargers: () => "/chargers",
   chargersSummary: () => "/chargers/summary",
 
+  // --- Vehicles (2W EV) — served from VEHICLE_API_BASE_URL, not API_BASE_URL ---
+  vehicles: (p: { classification?: string; riskCategory?: string; vehicleClass?: string; location?: string } = {}) =>
+    `/vehicles${qs({
+      classification: p.classification,
+      risk_category: p.riskCategory,
+      vehicle_class: p.vehicleClass,
+      location: p.location,
+    })}`,
+  vehiclesSummary: () => "/vehicles/summary",
+  vehiclesRiskTop: (sortBy = "risk", order: "asc" | "desc" = "desc", limit = 20) =>
+    `/vehicles/risk/top${qs({ sort_by: sortBy, order, limit })}`,
+  vehicle: (assetId: string) => `/vehicles/${id(assetId)}`,
+  vehicleTelemetry: (assetId: string, days = 14) => `/vehicles/${id(assetId)}/telemetry${qs({ days })}`,
+  vehicleLinkage: (assetId: string) => `/vehicles/${id(assetId)}/linkage`,
+
   // --- Operations ---
   operationsSummary: () => "/operations/summary",
   operationsAlerts: (limit?: number) => `/operations/alerts${qs({ limit })}`,

@@ -26,6 +26,11 @@ import type {
   ApiStationDetail,
   ApiStationScore,
   ApiStationSummary,
+  ApiVehicleDetail,
+  ApiVehicleFleetSummary,
+  ApiVehicleLinkage,
+  ApiVehicleSummary,
+  ApiVehicleTelemetryPoint,
 } from "./types";
 
 // The service is deployed on a platform that cold-starts, so first requests can
@@ -50,6 +55,16 @@ export function apiBaseUrl(): string | null {
   return raw.replace(/\/+$/, "");
 }
 
+/** The vehicle-scoring endpoints (§18/§19's 2W EV Asset 360) live on a
+ * separate deployment from the rest of this platform, so they get their own
+ * base URL and their own "not configured" message rather than silently
+ * reusing (or being silently blocked by) API_BASE_URL. */
+export function vehicleApiBaseUrl(): string | null {
+  const raw = process.env.VEHICLE_API_BASE_URL?.trim();
+  if (!raw) return null;
+  return raw.replace(/\/+$/, "");
+}
+
 export class ApiUnavailableError extends Error {
   constructor(
     message: string,
@@ -60,10 +75,7 @@ export class ApiUnavailableError extends Error {
   }
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const base = apiBaseUrl();
-  if (!base) throw new ApiUnavailableError("The monitoring service address is not configured");
-
+async function requestJson<T>(base: string, path: string): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -86,6 +98,20 @@ async function getJson<T>(path: string): Promise<T> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  const base = apiBaseUrl();
+  if (!base) throw new ApiUnavailableError("The monitoring service address is not configured");
+  return requestJson<T>(base, path);
+}
+
+/** Same as getJson, but against VEHICLE_API_BASE_URL — the vehicle-scoring
+ * endpoints are a separate deployment (see vehicleApiBaseUrl). */
+async function getVehicleJson<T>(path: string): Promise<T> {
+  const base = vehicleApiBaseUrl();
+  if (!base) throw new ApiUnavailableError("The vehicle monitoring service address is not configured");
+  return requestJson<T>(base, path);
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -172,6 +198,30 @@ export const fetchStationScores = cache(
 export const fetchChargers = cache(
   (): Promise<ApiCharger[]> =>
     getJson<ApiCharger[]>(ENDPOINTS.chargers()),
+);
+
+// --- Vehicles (2W EV) — a separate deployment, see vehicleApiBaseUrl ---
+
+export const fetchVehicles = cache(
+  (p: { classification?: string; riskCategory?: string } = {}): Promise<ApiVehicleSummary[]> =>
+    getVehicleJson<ApiVehicleSummary[]>(ENDPOINTS.vehicles(p)),
+);
+
+export const fetchVehiclesSummary = cache(
+  (): Promise<ApiVehicleFleetSummary> => getVehicleJson<ApiVehicleFleetSummary>(ENDPOINTS.vehiclesSummary()),
+);
+
+export const fetchVehicle = cache(
+  (assetId: string): Promise<ApiVehicleDetail> => getVehicleJson<ApiVehicleDetail>(ENDPOINTS.vehicle(assetId)),
+);
+
+export const fetchVehicleTelemetry = cache(
+  (assetId: string, days = 14): Promise<ApiVehicleTelemetryPoint[]> =>
+    getVehicleJson<ApiVehicleTelemetryPoint[]>(ENDPOINTS.vehicleTelemetry(assetId, days)),
+);
+
+export const fetchVehicleLinkage = cache(
+  (assetId: string): Promise<ApiVehicleLinkage> => getVehicleJson<ApiVehicleLinkage>(ENDPOINTS.vehicleLinkage(assetId)),
 );
 
 export const fetchHealthDistribution = cache(

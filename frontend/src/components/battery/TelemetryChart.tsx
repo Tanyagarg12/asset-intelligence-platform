@@ -2,10 +2,9 @@
 
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-// Generic over any daily series with a `date` field — used for real dock
-// telemetry (AssetTelemetryPointView) and, with a visible "demo data" label
-// wherever it's used that way, fabricated preview series like the Vehicles
-// page's (see lib/dummy/vehicles.ts).
+// Generic over any daily series with a `date` field — used for dock
+// telemetry (AssetTelemetryPointView) and vehicle telemetry
+// (VehicleTelemetryPointView) alike.
 export function TelemetryChart<T extends { date: string }>({
   data,
   dataKey,

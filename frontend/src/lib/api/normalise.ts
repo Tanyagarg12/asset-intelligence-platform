@@ -21,6 +21,11 @@ import type {
   ApiStation,
   ApiStationDetail,
   ApiStationScore,
+  ApiVehicleDetail,
+  ApiVehicleFleetSummary,
+  ApiVehicleLinkage,
+  ApiVehicleSummary,
+  ApiVehicleTelemetryPoint,
 } from "./types";
 
 export type DataSource = "api" | "demo";
@@ -641,4 +646,228 @@ export function normaliseDistribution(dist: ApiHealthDistribution): Bucket[] {
     count: bucket?.count ?? 0,
     pct: bucket?.percent ?? 0,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Vehicles (2W EV) — GET /vehicles and friends, on VEHICLE_API_BASE_URL.
+// ---------------------------------------------------------------------------
+
+export interface VehicleRow {
+  vehicleId: string;
+  model: string;
+  manufacturer: string | null;
+  registration: string | null;
+  vehicleType: string;
+  stationId: string | null;
+  location: string | null;
+  online: boolean;
+  operationalStatus: string | null;
+  lastSeen: string | null;
+  healthScore: number | null;
+  healthClassification: string | null;
+  anomalyScore: number | null;
+  anomalySeverity: string | null;
+  riskScore: number | null;
+  riskCategoryRaw: string | null;
+  priority: string | null;
+  likelyIssue: string | null;
+  predictionWindow: string | null;
+  scoredAt: string | null;
+}
+
+/** OFFLINE/INACTIVE read as not-online; every other operational status
+ * (RUNNING, CHARGING, IDLE, …) counts as online. */
+function vehicleIsOnline(status: string | null): boolean {
+  if (!status) return false;
+  const s = status.toUpperCase();
+  return s !== "OFFLINE" && s !== "INACTIVE";
+}
+
+export function normaliseVehicle(row: ApiVehicleSummary): VehicleRow {
+  return {
+    vehicleId: row.asset_id,
+    model: row.model ?? row.asset_id,
+    manufacturer: row.manufacturer,
+    registration: row.registration_number,
+    vehicleType: row.asset_sub_type ?? "2W",
+    stationId: row.home_station_id,
+    location: row.location,
+    online: vehicleIsOnline(row.operational_status ?? row.status),
+    operationalStatus: row.operational_status,
+    lastSeen: row.last_seen,
+    healthScore: row.health_score,
+    healthClassification: row.health_classification,
+    anomalyScore: row.anomaly_score,
+    anomalySeverity: row.anomaly_severity,
+    riskScore: row.risk_score,
+    riskCategoryRaw: row.risk_category,
+    priority: row.priority,
+    likelyIssue: row.likely_issue,
+    predictionWindow: row.prediction_window,
+    scoredAt: row.scored_at,
+  };
+}
+
+export interface VehicleDimension {
+  key: string;
+  label: string;
+  score: number;
+}
+
+export interface VehicleLatestTelemetry {
+  timestamp: string | null;
+  status: string | null;
+  batterySoc: number | null;
+  batteryVoltage: number | null;
+  batteryTemperature: number | null;
+  motorTemperature: number | null;
+  vehicleSpeed: number | null;
+  odometerKm: number | null;
+  chargingStatus: string | null;
+  energyConsumption: number | null;
+  rangeEstimateKm: number | null;
+  connectivityStatus: string | null;
+  errorCode: string | null;
+}
+
+export interface VehicleDetailView extends VehicleRow {
+  dimensions: VehicleDimension[];
+  detectedSignals: string[];
+  sla: string | null;
+  businessImpact: string | null;
+  recommendedAction: string | null;
+  suggestedChecks: string[];
+  riskNote: string | null;
+  latestTelemetry: VehicleLatestTelemetry | null;
+}
+
+export function normaliseVehicleDetail(detail: ApiVehicleDetail): VehicleDetailView {
+  const t = detail.latest_telemetry;
+  return {
+    ...normaliseVehicle(detail),
+    dimensions: Object.entries(detail.dimension_scores ?? {}).map(([key, score]) => ({
+      key,
+      label: dimensionLabel(key),
+      score,
+    })),
+    detectedSignals: detail.detected_signals ?? [],
+    sla: detail.sla,
+    businessImpact: detail.business_impact,
+    recommendedAction: detail.recommended_action,
+    suggestedChecks: detail.suggested_checks ?? [],
+    riskNote: detail.risk_note,
+    latestTelemetry: t
+      ? {
+          timestamp: t.timestamp,
+          status: t.vehicle_status,
+          batterySoc: t.battery_soc,
+          batteryVoltage: t.battery_voltage,
+          batteryTemperature: t.battery_temperature,
+          motorTemperature: t.motor_temperature,
+          vehicleSpeed: t.vehicle_speed,
+          odometerKm: t.vehicle_odometer,
+          chargingStatus: t.charging_status,
+          energyConsumption: t.energy_consumption,
+          rangeEstimateKm: t.range_estimate,
+          connectivityStatus: t.connectivity_status,
+          errorCode: t.error_code,
+        }
+      : null,
+  };
+}
+
+export interface VehicleFleetSummaryView {
+  total: number;
+  healthy: number;
+  watch: number;
+  atRisk: number;
+  critical: number;
+  offline: number;
+  highRiskCount: number;
+  predictedFailureCount: number;
+  averageHealthScore: number | null;
+  asOf: string | null;
+}
+
+export function normaliseVehicleFleetSummary(s: ApiVehicleFleetSummary): VehicleFleetSummaryView {
+  return {
+    total: s.total,
+    healthy: s.healthy,
+    watch: s.watch,
+    atRisk: s.at_risk,
+    critical: s.critical,
+    offline: s.offline,
+    highRiskCount: s.high_risk_count,
+    predictedFailureCount: s.predicted_failure_count,
+    averageHealthScore: s.average_health_score,
+    asOf: s.as_of,
+  };
+}
+
+/** One day of a vehicle's telemetry trend — same shape family as
+ * AssetTelemetryPointView, kept separate since the underlying fields (EV
+ * battery/motor telemetry) don't line up with a QIS dock's. */
+export interface VehicleTelemetryPointView {
+  date: string;
+  batteryTemp: number | null;
+  motorTemp: number | null;
+  energyPerKm: number | null;
+  distanceKm: number | null;
+  avgSpeed: number | null;
+  connectivityUptime: number | null;
+  errorCount: number | null;
+}
+
+export function normaliseVehicleTelemetry(points: ApiVehicleTelemetryPoint[]): VehicleTelemetryPointView[] {
+  return points
+    .filter((p): p is ApiVehicleTelemetryPoint & { date: string } => Boolean(p.date))
+    .map((p) => ({
+      date: p.date,
+      batteryTemp: p.battery_temperature_mean,
+      motorTemp: p.motor_temperature_mean,
+      energyPerKm: p.energy_per_km,
+      distanceKm: p.distance_km,
+      avgSpeed: p.vehicle_speed_mean,
+      connectivityUptime: p.connectivity_uptime,
+      errorCount: p.error_count,
+    }));
+}
+
+export interface VehicleHomeStation {
+  stationId: string;
+  healthScore: number;
+  healthClassification: string;
+  riskScore: number;
+  riskCategoryRaw: string;
+  priority: string;
+  likelyIssue: string;
+}
+
+export interface VehicleLinkageView {
+  stationId: string | null;
+  location: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  homeStation: VehicleHomeStation | null;
+}
+
+export function normaliseVehicleLinkage(l: ApiVehicleLinkage): VehicleLinkageView {
+  const hs = l.home_station;
+  return {
+    stationId: l.home_station_id,
+    location: l.location,
+    latitude: l.latitude,
+    longitude: l.longitude,
+    homeStation: hs
+      ? {
+          stationId: hs.station_id,
+          healthScore: hs.health_score,
+          healthClassification: hs.health_classification,
+          riskScore: hs.risk_score,
+          riskCategoryRaw: hs.risk_category,
+          priority: hs.priority,
+          likelyIssue: hs.likely_issue,
+        }
+      : null,
+  };
 }

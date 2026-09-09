@@ -13,12 +13,12 @@ import { RiskSummaryPanel } from "@/components/dashboard/RiskSummaryPanel";
 import { TopAtRiskTable } from "@/components/dashboard/TopAtRiskTable";
 import { TopRiskAssets, type RankedAsset } from "@/components/dashboard/TopRiskAssets";
 import { getDashboardData } from "@/lib/api/dashboard";
-import { getDummyVehicles } from "@/lib/dummy/vehicles";
+import { getVehiclesPage } from "@/lib/api/resources";
 
 /** HEALTHY is fine; WATCH/AT_RISK/CRITICAL all count as "needs attention" —
  * same three-band grouping the Vehicles table itself filters by. */
-function vehicleNeedsAttention(classification: string): boolean {
-  return classification.toUpperCase() !== "HEALTHY";
+function vehicleNeedsAttention(classification: string | null): boolean {
+  return classification !== null && classification.toUpperCase() !== "HEALTHY";
 }
 
 /** A station's risk as a 0-100 figure, so every card ranks on one scale. */
@@ -35,7 +35,12 @@ export default async function DashboardPage({
   // The header's date control writes the trend window here.
   const { days } = await searchParams;
   const trendDays = Math.min(365, Math.max(1, Number(days) || 7));
-  const { data, stations, chargers } = await getDashboardData(trendDays);
+  // Vehicles are on a separate deployment (see vehicleApiBaseUrl) — fetched
+  // independently so a hiccup there never blanks the rest of the dashboard.
+  const [{ data, stations, chargers }, { data: vehiclesPage }] = await Promise.all([
+    getDashboardData(trendDays),
+    getVehiclesPage(),
+  ]);
   const { stations: stationCounts, chargers: chargerCounts, batteries } = data;
 
   // Each card ranks its own assets and shows only the top few, so the layout
@@ -115,31 +120,33 @@ export default async function DashboardPage({
     tag: row.priority,
   }));
 
-  // Demo data — this platform has no vehicle-telemetry service yet (see
-  // lib/dummy/vehicles.ts). Included so Vehicles shows up on the dashboard
-  // like every other asset type, flagged "Demo" everywhere it appears.
-  const vehicles = getDummyVehicles();
+  // Vehicles (2W EV) — served from a separate deployment; `vehicles` is []
+  // when that service is unreachable, so the card still renders (as empty)
+  // instead of the whole dashboard erroring out.
+  const vehicles = vehiclesPage?.rows ?? [];
   const vehiclesOnline = vehicles.filter((v) => v.online).length;
   const vehiclesAtRisk = vehicles.filter((v) => vehicleNeedsAttention(v.healthClassification));
   const vehicleItems: RiskItem[] = vehiclesAtRisk.map((v) => ({
     id: v.vehicleId,
     href: `/vehicles/${v.vehicleId}`,
-    detail: v.likelyIssue,
-    risk: v.riskScore,
-    tag: `${v.priority} · Demo`,
+    detail: v.likelyIssue ?? "No issue reported",
+    risk: v.riskScore ?? 0,
+    tag: v.priority ?? undefined,
   }));
 
   topRiskAssets.push(
-    ...vehiclesAtRisk.map((v) => ({
-      id: v.vehicleId,
-      key: `vehicle-${v.vehicleId}`,
-      kind: "vehicle" as const,
-      href: `/vehicles/${v.vehicleId}`,
-      issue: v.likelyIssue,
-      location: v.stationId,
-      risk: v.riskScore,
-      tag: v.priority,
-    })),
+    ...vehiclesAtRisk
+      .filter((v) => v.riskScore !== null)
+      .map((v) => ({
+        id: v.vehicleId,
+        key: `vehicle-${v.vehicleId}`,
+        kind: "vehicle" as const,
+        href: `/vehicles/${v.vehicleId}`,
+        issue: v.likelyIssue ?? "No issue reported",
+        location: v.stationId ?? "",
+        risk: v.riskScore as number,
+        tag: v.priority ?? "",
+      })),
   );
 
   return (
@@ -199,7 +206,7 @@ export default async function DashboardPage({
             icon={Bike}
             iconBg="color-mix(in srgb, var(--series-5) 12%, transparent)"
             iconColor="var(--series-5)"
-            label="Vehicles (2W) · Demo"
+            label="Vehicles (2W)"
             value={vehicles.length}
             href="/vehicles"
             breakdown={[
@@ -208,14 +215,14 @@ export default async function DashboardPage({
               { label: "Needs attention", value: vehiclesAtRisk.length, tone: "warning" },
             ]}
             items={vehicleItems}
-            emptyMessage="All demo vehicles healthy."
+            emptyMessage="All vehicles healthy."
           />
         </div>
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
           <Panel
             title="Top Risk Assets"
-            titleNote="(all asset types, incl. demo vehicles)"
+            titleNote="(all asset types)"
             className="lg:col-span-7"
             action={<ViewAllLink href="/ai-predictions" />}
           >

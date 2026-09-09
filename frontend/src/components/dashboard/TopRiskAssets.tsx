@@ -37,7 +37,7 @@ const KIND_STYLE: Record<AssetKind, { icon: typeof Plug; label: string; color: s
   },
   vehicle: {
     icon: Bike,
-    label: "Vehicle · Demo",
+    label: "Vehicle",
     color: "var(--series-5)",
     bg: "color-mix(in srgb, var(--series-5) 12%, transparent)",
   },

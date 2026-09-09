@@ -8,6 +8,7 @@
 import {
   ApiUnavailableError,
   apiBaseUrl,
+  vehicleApiBaseUrl,
   fetchAssetTelemetry,
   fetchBatteries,
   fetchBattery,
@@ -24,6 +25,11 @@ import {
   fetchStations,
   fetchStationScores,
   fetchStationsSummary,
+  fetchVehicle,
+  fetchVehicleLinkage,
+  fetchVehicleTelemetry,
+  fetchVehicles,
+  fetchVehiclesSummary,
 } from "./client";
 import type { ApiBatteryCounts } from "./types";
 import {
@@ -39,6 +45,12 @@ import {
   normalisePredictiveWarning,
   normaliseStation,
   normaliseStationDetail,
+  normaliseVehicle,
+  normaliseVehicleDetail,
+  normaliseVehicleFleetSummary,
+  normaliseVehicleLinkage,
+  normaliseVehicleTelemetry,
+  riskCategory,
   type AssetRow,
   type AssetTelemetryPointView,
   type BatteryDetailView,
@@ -49,6 +61,11 @@ import {
   type PredictiveWarningRow,
   type StationDetailView,
   type StationRow,
+  type VehicleDetailView,
+  type VehicleFleetSummaryView,
+  type VehicleLinkageView,
+  type VehicleRow,
+  type VehicleTelemetryPointView,
 } from "./normalise";
 
 export interface Loaded<T> {
@@ -66,6 +83,21 @@ function describe(error: unknown): string {
 
 async function load<T>(fn: () => Promise<T>): Promise<Loaded<T>> {
   if (!apiBaseUrl()) return { data: null, error: NOT_CONFIGURED };
+  try {
+    return { data: await fn(), error: null };
+  } catch (error) {
+    return { data: null, error: describe(error) };
+  }
+}
+
+const VEHICLE_NOT_CONFIGURED =
+  "The dashboard is not connected to the vehicle monitoring service — set VEHICLE_API_BASE_URL in frontend/.env.local and restart.";
+
+/** Vehicles are scored on a separate deployment (VEHICLE_API_BASE_URL), so
+ * this checks that address rather than API_BASE_URL — the two can be
+ * configured (or broken) independently. */
+async function loadVehicle<T>(fn: () => Promise<T>): Promise<Loaded<T>> {
+  if (!vehicleApiBaseUrl()) return { data: null, error: VEHICLE_NOT_CONFIGURED };
   try {
     return { data: await fn(), error: null };
   } catch (error) {
@@ -294,6 +326,73 @@ export function getChargerDetail(chargerId: string, stationId?: string): Promise
       telemetry,
     };
   });
+}
+
+// --- Vehicles (2W EV) — a separate deployment, see vehicleApiBaseUrl ---
+
+export interface VehiclesPageData {
+  rows: VehicleRow[];
+  summary: VehicleFleetSummaryView | null;
+}
+
+export function getVehiclesPage(): Promise<Loaded<VehiclesPageData>> {
+  return loadVehicle(async () => {
+    const [apiRows, summary] = await Promise.all([fetchVehicles(), fetchVehiclesSummary().catch(() => null)]);
+    return {
+      rows: apiRows.map(normaliseVehicle),
+      summary: summary ? normaliseVehicleFleetSummary(summary) : null,
+    };
+  });
+}
+
+export interface VehicleDetailData {
+  vehicle: VehicleDetailView;
+  /** GET /vehicles/{id}/linkage — the vehicle's home station and that
+   * station's own score. Null only if that call itself fails; the rest of
+   * the page still renders from `vehicle`. */
+  linkage: VehicleLinkageView | null;
+  telemetry: VehicleTelemetryPointView[];
+}
+
+export function getVehicleDetail(vehicleId: string): Promise<Loaded<VehicleDetailData>> {
+  return loadVehicle(async () => {
+    const [detail, linkage, telemetryPoints] = await Promise.all([
+      fetchVehicle(vehicleId).then(normaliseVehicleDetail),
+      fetchVehicleLinkage(vehicleId).then(normaliseVehicleLinkage).catch(() => null),
+      fetchVehicleTelemetry(vehicleId, 14).catch(() => []),
+    ]);
+    return {
+      vehicle: detail,
+      linkage,
+      telemetry: normaliseVehicleTelemetry(telemetryPoints),
+    };
+  });
+}
+
+/** Feeds the real vehicle fleet into the AI Predictions register alongside
+ * this platform's own predictive warnings — same shape as
+ * getPredictiveWarningsPage(), tagged assetType "VEHICLE" so the UI can
+ * label it distinctly (see PredictiveWarningsTable). Empty (never throws)
+ * when the vehicle service is unreachable, so it degrades the same way every
+ * other independent fetch on that page does. */
+export async function getVehiclePredictiveWarnings(): Promise<PredictiveWarningRow[]> {
+  const { data } = await getVehiclesPage();
+  if (!data) return [];
+  return data.rows
+    .filter((r) => r.riskScore !== null && r.riskCategoryRaw)
+    .map((r) => ({
+      assetType: "VEHICLE",
+      assetId: r.vehicleId,
+      location: r.location,
+      riskScore: r.riskScore as number,
+      riskCategory: riskCategory(r.riskCategoryRaw as string),
+      riskCategoryRaw: r.riskCategoryRaw as string,
+      priority: r.priority ?? "—",
+      likelyIssue: r.likelyIssue ?? "No issue reported",
+      predictionWindow: r.predictionWindow ?? "Not available",
+      scoredAt: r.scoredAt ?? "",
+      href: `/vehicles/${r.vehicleId}`,
+    }));
 }
 
 export interface HeaderAlert {

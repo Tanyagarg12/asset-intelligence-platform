@@ -223,6 +223,125 @@ export interface ApiCharger {
 }
 
 // ---------------------------------------------------------------------------
+// Vehicles (2W EV) — served from a separate deployment (VEHICLE_API_BASE_URL)
+// that scores the fleet's electric two-wheelers; GET /vehicles · /vehicles/
+// summary · /vehicles/risk/top · /vehicles/{asset_id} · /vehicles/{asset_id}/
+// telemetry · /vehicles/{asset_id}/linkage.
+// ---------------------------------------------------------------------------
+
+/** One row of GET /vehicles or GET /vehicles/risk/top. */
+export interface ApiVehicleSummary {
+  asset_id: string;
+  asset_type: string | null;
+  asset_sub_type: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  registration_number: string | null;
+  location: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  home_station_id: string | null;
+  status: string | null;
+  operational_status: string | null;
+  last_seen: string | null;
+  health_score: number | null;
+  health_classification: string | null;
+  anomaly_score: number | null;
+  anomaly_severity: string | null;
+  risk_score: number | null;
+  risk_category: string | null;
+  priority: string | null;
+  likely_issue: string | null;
+  likely_issue_code: string | null;
+  scenario_id: string | null;
+  confidence: number | null;
+  confidence_band: string | null;
+  prediction_window: string | null;
+  scored_at: string | null;
+}
+
+/** The vehicle's most recent single telemetry reading, embedded in
+ * GET /vehicles/{asset_id}. */
+export interface ApiVehicleTelemetrySnapshot {
+  timestamp: string | null;
+  vehicle_status: string | null;
+  battery_soc: number | null;
+  battery_voltage: number | null;
+  battery_current: number | null;
+  battery_temperature: number | null;
+  motor_temperature: number | null;
+  motor_current: number | null;
+  motor_rpm: number | null;
+  vehicle_speed: number | null;
+  vehicle_odometer: number | null;
+  charging_status: string | null;
+  energy_consumption: number | null;
+  range_estimate: number | null;
+  gps_latitude: number | null;
+  gps_longitude: number | null;
+  connectivity_status: string | null;
+  error_code: string | null;
+}
+
+/** GET /vehicles/{asset_id} — the 2W EV "Asset 360". */
+export interface ApiVehicleDetail extends ApiVehicleSummary {
+  dimension_scores: Record<string, number> | null;
+  detected_signals: string[];
+  sla: string | null;
+  business_impact: string | null;
+  recommended_action: string | null;
+  suggested_checks: string[];
+  risk_note: string | null;
+  latest_telemetry: ApiVehicleTelemetrySnapshot | null;
+  telemetry_profile: string[];
+}
+
+/** GET /vehicles/summary */
+export interface ApiVehicleFleetSummary {
+  total: number;
+  healthy: number;
+  watch: number;
+  at_risk: number;
+  critical: number;
+  offline: number;
+  high_risk_count: number;
+  predicted_failure_count: number;
+  average_health_score: number | null;
+  as_of: string | null;
+}
+
+/** One day of GET /vehicles/{asset_id}/telemetry — daily aggregates. */
+export interface ApiVehicleTelemetryPoint {
+  date: string | null;
+  battery_temperature_mean: number | null;
+  battery_temperature_max: number | null;
+  battery_soc_mean: number | null;
+  motor_temperature_mean: number | null;
+  motor_current_mean: number | null;
+  energy_consumption_total: number | null;
+  energy_per_km: number | null;
+  range_full_estimate: number | null;
+  distance_km: number | null;
+  vehicle_speed_mean: number | null;
+  connectivity_uptime: number | null;
+  reading_count: number | null;
+  error_count: number | null;
+}
+
+/** GET /vehicles/{asset_id}/linkage — where the vehicle is based and how
+ * that station is itself scoring. `home_station` matches the shape of a
+ * GET /stations/scores row (confirmed against a live response), though the
+ * API declares it as a loose object. */
+export interface ApiVehicleLinkage {
+  asset_id: string;
+  home_station_id: string | null;
+  location: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  home_station: ApiStationScore | null;
+}
+
+// ---------------------------------------------------------------------------
 // Demo controls (POC-09 / spec section 14 — "Demo Data Control")
 // ---------------------------------------------------------------------------
 
