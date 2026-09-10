@@ -282,9 +282,15 @@ export interface StationRow {
   highRiskDocks: number;
   latitude: number | null;
   longitude: number | null;
-  /** From the separate GET /stations/scores call — null until that call is
-   * merged in (see `mergeStationScore`), so the register still renders
-   * without these columns if that fetch fails on its own. `riskScore`,
+  /** The station's own AI-scored health — a different figure from
+   * avgHealthScore above (the plain average of its docks). GET /stations
+   * embeds this directly now, so it's populated from the very first fetch
+   * rather than only after a separate /stations/scores merge. */
+  healthScore: number | null;
+  /** GET /stations now embeds the same scoring GET /stations/scores does,
+   * so these are populated directly in normaliseStation — `mergeStationScore`
+   * only needs to run for the *composite* figures (see below), which stay
+   * exclusive to /stations/scores and /stations/{id}. `riskScore`,
    * `riskCategoryRaw` and `priority` are already the *composite* figures
    * (raw risk folded together with any non-telemetry insight) when one
    * applies — the "top", truest number, not the raw telemetry-only one. */
@@ -317,6 +323,7 @@ export function mergeStationScore(row: StationRow, score: ApiStationScore | unde
   const hasComposite = score.composite_risk_score !== null;
   return {
     ...row,
+    healthScore: score.health_score,
     healthClassification: score.health_classification,
     anomalyScore: score.anomaly_score,
     anomalySeverity: score.anomaly_severity,
@@ -409,16 +416,17 @@ export function normaliseStation(row: ApiStation): StationRow {
     highRiskDocks: row.high_risk_docks,
     latitude: row.latitude ?? null,
     longitude: row.longitude ?? null,
-    healthClassification: null,
-    anomalyScore: null,
-    anomalySeverity: null,
-    riskScore: null,
-    riskCategoryRaw: null,
-    priority: null,
-    likelyIssue: null,
+    healthScore: row.health_score ?? null,
+    healthClassification: row.health_classification ?? null,
+    anomalyScore: row.anomaly_score ?? null,
+    anomalySeverity: row.anomaly_severity ?? null,
+    riskScore: row.risk_score ?? null,
+    riskCategoryRaw: row.risk_category ?? null,
+    priority: row.priority ?? null,
+    likelyIssue: row.likely_issue ?? null,
     riskEscalated: false,
-    baseRiskScore: null,
-    baseRiskCategoryRaw: null,
+    baseRiskScore: row.risk_score ?? null,
+    baseRiskCategoryRaw: row.risk_category ?? null,
     insightCount: 0,
     upliftReasons: [],
   };
@@ -432,14 +440,18 @@ export function normaliseCharger(row: ApiCharger): ChargerRow {
     online: row.online,
     faulty: row.faulty,
     lastSeen: row.last_seen ?? null,
-    healthScore: null,
-    healthClassification: null,
-    anomalyScore: null,
-    anomalySeverity: null,
-    riskScore: null,
-    riskCategoryRaw: null,
-    priority: null,
-    likelyIssue: null,
+    // GET /chargers now embeds the same scoring GET /chargers/scores does,
+    // so this is populated directly rather than left null until a separate
+    // merge succeeds — mergeChargerScore/mergeChargerOperationsRisk still
+    // run to confirm/refresh these from their own dedicated calls.
+    healthScore: row.health_score ?? null,
+    healthClassification: row.health_classification ?? null,
+    anomalyScore: row.anomaly_score ?? null,
+    anomalySeverity: row.anomaly_severity ?? null,
+    riskScore: row.risk_score ?? null,
+    riskCategoryRaw: row.risk_category ?? null,
+    priority: row.priority ?? null,
+    likelyIssue: row.likely_issue ?? null,
   };
 }
 

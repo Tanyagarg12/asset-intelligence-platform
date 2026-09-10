@@ -156,11 +156,28 @@ export interface ApiStation {
   chargers_online: number;
   chargers_offline: number;
   online: boolean;
+  /** The plain average of this station's own docks' health scores — a
+   * different figure from `health_score` below, which is the station's own
+   * AI-scored health (not simply averaged from its docks). */
   avg_health_score: number;
   healthy_docks: number;
   at_risk_docks: number;
   critical_docks: number;
   high_risk_docks: number;
+  /** The station's own AI health/risk score — GET /stations now embeds the
+   * same scoring GET /stations/scores does, so the register never has to
+   * fall back to avg_health_score for this. All nullable since older
+   * deployments may not send them yet. */
+  health_score?: number | null;
+  health_classification?: string | null;
+  anomaly_score?: number | null;
+  anomaly_severity?: string | null;
+  risk_score?: number | null;
+  risk_category?: string | null;
+  priority?: string | null;
+  likely_issue?: string | null;
+  prediction_window?: string | null;
+  scored_at?: string | null;
   /** Requested additions — absent until the service exposes them. */
   latitude?: number | null;
   longitude?: number | null;
@@ -259,12 +276,26 @@ export interface ApiStationDetail {
 
 export interface ApiCharger {
   charger_id: string;
+  charger_uid?: string;
   dock_id: string;
   station_id: string;
   online: boolean;
   faulty: boolean;
   /** Null for chargers that have never reported — offline units send null here. */
   last_seen: string | null;
+  /** The charger's own AI score — GET /chargers now embeds the same scoring
+   * GET /chargers/scores does. Nullable since older deployments may not
+   * send them yet. */
+  health_score?: number | null;
+  health_classification?: string | null;
+  anomaly_score?: number | null;
+  anomaly_severity?: string | null;
+  risk_score?: number | null;
+  risk_category?: string | null;
+  priority?: string | null;
+  likely_issue?: string | null;
+  prediction_window?: string | null;
+  scored_at?: string | null;
 }
 
 /** One row of GET /chargers/scores or /chargers/risk/top — the charger's own

@@ -103,6 +103,9 @@ export async function getDashboardData(trendDays = 7): Promise<DashboardResult> 
         },
         riskNotes: { maintenanceDue: riskSummary?.maintenance_due.note ?? null },
         healthTrend: normaliseTrend(trend) ?? data.healthTrend,
+        // failureReasons comes straight from GET /dashboard/command-center's
+        // own top_failure_reasons (set in normaliseCommandCenter) — that is
+        // the platform's canonical "Top Failure Reasons" list for this panel.
       },
       stations: stations
         .map(normaliseStation)
