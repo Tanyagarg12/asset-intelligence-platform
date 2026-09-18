@@ -119,10 +119,87 @@ export interface ApiCommandCenter {
   stations: ApiStationCounts;
   chargers: ApiChargerCounts;
   batteries: ApiBatteryCounts;
+  /** Absent on deployments that predate the 2W EV vehicle fleet. */
+  vehicles?: ApiVehicleFleetSummary | null;
   top_critical_alerts: ApiAlert[];
   top_at_risk_batteries: ApiAtRiskBattery[];
+  top_at_risk_vehicles?: ApiVehicleSummary[];
   top_failure_reasons: ApiFailureReason[];
   health_trend?: ApiHealthTrendPoint[] | null;
+}
+
+// ---------------------------------------------------------------------------
+// GET /vehicles · GET /vehicles/summary · GET /vehicles/{asset_id}
+//
+// The 2W EV fleet — the same registry + scoring model as batteries/stations/
+// chargers, keyed by asset_id ("EV-2W-1000") and carrying the vehicle's own
+// registration_number (its number-plate code) alongside the health/risk
+// scoring every other asset type gets.
+// ---------------------------------------------------------------------------
+
+export interface ApiVehicleFleetSummary {
+  total: number;
+  healthy: number;
+  watch: number;
+  at_risk: number;
+  critical: number;
+  offline: number;
+  high_risk_count: number;
+  predicted_failure_count: number;
+  average_health_score?: number | null;
+  as_of?: string | null;
+}
+
+/** One row of GET /vehicles, or of top_at_risk_vehicles / operations risk
+ * lists that carry vehicles. */
+export interface ApiVehicleSummary {
+  asset_id: string;
+  asset_type?: string | null;
+  asset_sub_type?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  registration_number?: string | null;
+  location?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  home_station_id?: string | null;
+  status?: string | null;
+  operational_status?: string | null;
+  last_seen?: string | null;
+  health_score?: number | null;
+  health_classification?: string | null;
+  anomaly_score?: number | null;
+  anomaly_severity?: string | null;
+  risk_score?: number | null;
+  risk_category?: string | null;
+  priority?: string | null;
+  likely_issue?: string | null;
+  likely_issue_code?: string | null;
+  scenario_id?: string | null;
+  confidence?: number | null;
+  confidence_band?: string | null;
+  prediction_window?: string | null;
+  scored_at?: string | null;
+}
+
+export interface ApiVehicleDimensionScores {
+  battery?: number | null;
+  motor?: number | null;
+  energy_efficiency?: number | null;
+  vehicle_performance?: number | null;
+  connectivity?: number | null;
+  operational?: number | null;
+}
+
+/** GET /vehicles/{asset_id} — the vehicle's own Asset 360. */
+export interface ApiVehicleDetail extends ApiVehicleSummary {
+  dimension_scores?: ApiVehicleDimensionScores | null;
+  detected_signals?: string[];
+  sla?: string | null;
+  business_impact?: string | null;
+  recommended_action?: string | null;
+  suggested_checks?: string[];
+  risk_note?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,16 +487,19 @@ export interface ApiAsset {
  * asset_id, or battery_id). `station_id`/`location` are resolved for every
  * type, so a row is dispatchable on its own. */
 export interface ApiOperationsRiskItem {
-  asset_type: string;
+  /** Newer deployments of this endpoint stopped sending asset_type,
+   * station_id and prediction_window — normaliseOperationsRisk infers a type
+   * from the asset_id shape when it's missing. */
+  asset_type?: string | null;
   asset_id: string;
-  station_id: string | null;
+  station_id?: string | null;
   location: string | null;
   risk_score: number;
   risk_category: string;
   likely_issue: string | null;
   business_impact: string | null;
   priority: string;
-  prediction_window: string | null;
+  prediction_window?: string | null;
   scored_at: string | null;
 }
 

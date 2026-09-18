@@ -8,6 +8,7 @@ import {
   Activity,
   BatteryCharging,
   Bell,
+  Bike,
   LayoutGrid,
   Map,
   Plug,
@@ -31,6 +32,7 @@ export function Sidebar({ alertCount }: { alertCount: number }) {
     { href: "/stations", label: "Stations", icon: Warehouse },
     { href: "/chargers", label: "Chargers", icon: Plug },
     { href: "/batteries", label: "Batteries", icon: BatteryCharging },
+    { href: "/vehicles", label: "Vehicles", icon: Bike },
     { href: "/ai-predictions", label: "AI Predictions", icon: Sparkles },
     { href: "/alerts", label: "Alerts", icon: Bell, badge: alertCount },
     { href: "/map-view", label: "Map View", icon: Map },
@@ -38,13 +40,13 @@ export function Sidebar({ alertCount }: { alertCount: number }) {
 
   return (
     <aside className="flex h-screen w-[212px] flex-none flex-col border-r border-[var(--border-hairline)] bg-[var(--surface-1)]">
-      <Link href="/" className="flex items-center px-5 py-5" aria-label="SUN MOBILITY — dashboard">
+      <Link href="/" className="flex items-center px-5 py-5" aria-label="Circumcircle Innovations — dashboard">
         <Image
-          src="/sun-mobility-logo.png"
-          alt="SUN MOBILITY"
-          width={201}
-          height={83}
-          className="h-14 w-auto"
+          src="/circumcircle-logo.png"
+          alt="Circumcircle Innovations"
+          width={312}
+          height={107}
+          className="h-auto w-full"
           priority
         />
       </Link>

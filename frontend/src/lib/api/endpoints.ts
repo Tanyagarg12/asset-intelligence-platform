@@ -42,6 +42,14 @@ export const ENDPOINTS = {
   assetEvents: (assetId: string, limit?: number) => `/assets/${id(assetId)}/events${qs({ limit })}`,
   assetTelemetry: (assetId: string, days = 7) => `/assets/${id(assetId)}/telemetry${qs({ days })}`,
 
+  // --- Vehicles (2W EV fleet) ---
+  vehicles: (p: { classification?: string; riskCategory?: string } = {}) =>
+    `/vehicles${qs({ classification: p.classification, risk_category: p.riskCategory })}`,
+  vehicle: (assetId: string) => `/vehicles/${id(assetId)}`,
+  vehicleSummary: () => "/vehicles/summary",
+  vehiclesTopRisk: (sortBy = "risk", order: "asc" | "desc" = "desc") =>
+    `/vehicles/risk/top${qs({ sort_by: sortBy, order })}`,
+
   // --- Stations & chargers ---
   stations: () => "/stations",
   stationsSummary: () => "/stations/summary",

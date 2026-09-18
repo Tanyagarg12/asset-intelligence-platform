@@ -28,6 +28,9 @@ import type {
   ApiStationDetail,
   ApiStationScore,
   ApiStationSummary,
+  ApiVehicleDetail,
+  ApiVehicleFleetSummary,
+  ApiVehicleSummary,
 } from "./types";
 
 // The service is deployed on a platform that cold-starts, so first requests can
@@ -188,6 +191,18 @@ export const fetchChargerScores = cache(
 /** The charger's own "Asset 360" — see ApiChargerDetail. */
 export const fetchChargerDetail = cache(
   (chargerUid: string): Promise<ApiChargerDetail> => getJson<ApiChargerDetail>(ENDPOINTS.chargerDetail(chargerUid)),
+);
+
+export const fetchVehicles = cache(
+  (): Promise<ApiVehicleSummary[]> => getJson<ApiVehicleSummary[]>(ENDPOINTS.vehicles()),
+);
+
+export const fetchVehicleSummary = cache(
+  (): Promise<ApiVehicleFleetSummary> => getJson<ApiVehicleFleetSummary>(ENDPOINTS.vehicleSummary()),
+);
+
+export const fetchVehicle = cache(
+  (assetId: string): Promise<ApiVehicleDetail> => getJson<ApiVehicleDetail>(ENDPOINTS.vehicle(assetId)),
 );
 
 export const fetchHealthDistribution = cache(

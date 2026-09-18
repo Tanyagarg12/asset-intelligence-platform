@@ -25,6 +25,8 @@ import type {
   ApiStation,
   ApiStationDetail,
   ApiStationScore,
+  ApiVehicleDetail,
+  ApiVehicleSummary,
 } from "./types";
 
 export type DataSource = "api" | "demo";
@@ -87,6 +89,14 @@ export interface DashboardData {
     /** null until the service exposes it — the tile is hidden when null. */
     maintenanceDue: number | null;
   };
+  /** null on deployments that predate the 2W EV vehicle fleet — the KPI card
+   * is hidden when null, same convention as maintenanceDue above. */
+  vehicles: {
+    total: number;
+    overallHealth: number | null;
+    highRisk: number;
+    predictedFailures: number;
+  } | null;
   healthBuckets: Bucket[];
   /** Total the donut is drawn from — all monitored assets, not just batteries. */
   distributionTotal: number;
@@ -213,6 +223,14 @@ export function normaliseCommandCenter(payload: ApiCommandCenter, source: DataSo
       predictedFailures: b.predicted_failure_count,
       maintenanceDue: b.maintenance_due_count ?? null,
     },
+    vehicles: payload.vehicles
+      ? {
+          total: payload.vehicles.total,
+          overallHealth: payload.vehicles.average_health_score ?? null,
+          highRisk: payload.vehicles.high_risk_count,
+          predictedFailures: payload.vehicles.predicted_failure_count,
+        }
+      : null,
     alerts: (payload.top_critical_alerts ?? []).map(normaliseAlert),
     atRisk: (payload.top_at_risk_batteries ?? []).map((row) => ({
       batteryId: row.battery_id,
@@ -398,6 +416,81 @@ export function normaliseBatteryDetail(detail: ApiBatteryDetail): BatteryDetailV
     suggestedChecks: detail.suggested_checks ?? [],
     riskNote: detail.risk_note,
     scoredAt: detail.scored_at,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// GET /vehicles · GET /vehicles/{asset_id} — the 2W EV fleet, same registry +
+// scoring model as batteries/stations/chargers. registrationNumber is the
+// vehicle's own number-plate code ("KA01AA1000").
+// ---------------------------------------------------------------------------
+
+export interface VehicleRow {
+  assetId: string;
+  registrationNumber: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  vehicleClass: string | null;
+  location: string | null;
+  homeStationId: string | null;
+  operationalStatus: string | null;
+  healthScore: number | null;
+  healthClassification: string | null;
+  anomalyScore: number | null;
+  anomalySeverity: string | null;
+  riskScore: number | null;
+  riskCategory: RiskCategory;
+  riskCategoryRaw: string | null;
+  priority: string | null;
+  likelyIssue: string | null;
+  predictionWindow: string | null;
+  scoredAt: string | null;
+}
+
+export interface VehicleDetailView extends VehicleRow {
+  dimensions: { key: string; label: string; score: number }[];
+  detectedSignals: string[];
+  sla: string | null;
+  businessImpact: string | null;
+  suggestedChecks: string[];
+  riskNote: string | null;
+}
+
+export function normaliseVehicle(row: ApiVehicleSummary): VehicleRow {
+  return {
+    assetId: row.asset_id,
+    registrationNumber: row.registration_number ?? null,
+    manufacturer: row.manufacturer ?? null,
+    model: row.model ?? null,
+    vehicleClass: row.asset_sub_type ?? null,
+    location: row.location ?? null,
+    homeStationId: row.home_station_id ?? null,
+    operationalStatus: row.operational_status ?? null,
+    healthScore: row.health_score ?? null,
+    healthClassification: row.health_classification ?? null,
+    anomalyScore: row.anomaly_score ?? null,
+    anomalySeverity: row.anomaly_severity ?? null,
+    riskScore: row.risk_score ?? null,
+    riskCategory: riskCategory(row.risk_category ?? "LOW"),
+    riskCategoryRaw: row.risk_category ?? null,
+    priority: row.priority ?? null,
+    likelyIssue: row.likely_issue ?? null,
+    predictionWindow: row.prediction_window ?? null,
+    scoredAt: row.scored_at ?? null,
+  };
+}
+
+export function normaliseVehicleDetail(detail: ApiVehicleDetail): VehicleDetailView {
+  return {
+    ...normaliseVehicle(detail),
+    dimensions: Object.entries(detail.dimension_scores ?? {})
+      .filter((entry): entry is [string, number] => entry[1] != null)
+      .map(([key, score]) => ({ key, label: dimensionLabel(key), score })),
+    detectedSignals: detail.detected_signals ?? [],
+    sla: detail.sla ?? null,
+    businessImpact: detail.business_impact ?? null,
+    suggestedChecks: detail.suggested_checks ?? [],
+    riskNote: detail.risk_note ?? null,
   };
 }
 
@@ -613,19 +706,47 @@ function parseDockId(assetId: string): string | null {
   return match ? `D${match[1]}` : null;
 }
 
+/** Some deployments of GET /operations/risk stopped sending asset_type — the
+ * id shape itself is unambiguous ("QIS-018-03" a dock, "QIS018" a station,
+ * "QIS018-CHG11" a charger, "BAT..." a battery, "EV-..." a vehicle), so this
+ * recovers the type rather than crashing the whole dashboard over one
+ * dropped field. */
+function inferAssetType(assetId: string): string {
+  if (/^BAT/i.test(assetId)) return "BATTERY";
+  if (/^EV-/i.test(assetId)) return "VEHICLE";
+  if (/^QIS-\d+-\d+$/i.test(assetId)) return "DOCK";
+  if (/^QIS\d+-CHG\d+$/i.test(assetId)) return "CHARGER";
+  if (/^QIS\d+$/i.test(assetId)) return "STATION";
+  return "UNKNOWN";
+}
+
+/** Recovers a DOCK or CHARGER row's own station_id from its asset_id when the
+ * API doesn't send one directly — "QIS-018-03" and "QIS018-CHG11" both embed
+ * their station's number. */
+function inferStationId(assetType: string, assetId: string): string | null {
+  if (assetType === "STATION") return assetId;
+  if (assetType === "DOCK") {
+    const digits = assetId.match(/^QIS-(\d+)-\d+$/i)?.[1];
+    return digits ? `QIS${digits}` : null;
+  }
+  if (assetType === "CHARGER") return assetId.match(/^(QIS\d+)-CHG\d+$/i)?.[1] ?? null;
+  return null;
+}
+
 export function normaliseOperationsRisk(row: ApiOperationsRiskItem): OperationsRiskRow {
+  const assetType = row.asset_type ?? inferAssetType(row.asset_id);
   return {
-    assetType: row.asset_type,
+    assetType,
     assetId: row.asset_id,
-    stationId: row.station_id,
-    dockId: row.asset_type.toUpperCase() === "DOCK" ? parseDockId(row.asset_id) : null,
+    stationId: row.station_id ?? inferStationId(assetType, row.asset_id),
+    dockId: assetType.toUpperCase() === "DOCK" ? parseDockId(row.asset_id) : null,
     location: row.location,
     riskScore: row.risk_score,
     riskCategoryRaw: row.risk_category,
     likelyIssue: row.likely_issue,
     businessImpact: row.business_impact,
     priority: row.priority,
-    predictionWindow: row.prediction_window,
+    predictionWindow: row.prediction_window ?? null,
     scoredAt: row.scored_at,
   };
 }
@@ -636,6 +757,8 @@ export function operationsRiskHref(row: OperationsRiskRow): string | null {
   switch (row.assetType.toUpperCase()) {
     case "BATTERY":
       return `/batteries/${row.assetId}`;
+    case "VEHICLE":
+      return `/vehicles/${row.assetId}`;
     case "STATION":
       return `/stations/${row.assetId}`;
     case "CHARGER": {

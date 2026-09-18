@@ -26,8 +26,11 @@ import {
   fetchStations,
   fetchStationScores,
   fetchStationsSummary,
+  fetchVehicle,
+  fetchVehicles,
+  fetchVehicleSummary,
 } from "./client";
-import type { ApiBatteryCounts } from "./types";
+import type { ApiBatteryCounts, ApiVehicleFleetSummary } from "./types";
 import {
   aggregateStationTelemetry,
   mergeChargerScore,
@@ -43,6 +46,8 @@ import {
   normalisePredictiveWarning,
   normaliseStation,
   normaliseStationDetail,
+  normaliseVehicle,
+  normaliseVehicleDetail,
   type AssetRow,
   type AssetTelemetryPointView,
   type BatteryDetailView,
@@ -55,6 +60,8 @@ import {
   type PredictiveWarningRow,
   type StationDetailView,
   type StationRow,
+  type VehicleDetailView,
+  type VehicleRow,
 } from "./normalise";
 
 export interface Loaded<T> {
@@ -98,6 +105,25 @@ export function getBatteriesPage(): Promise<Loaded<BatteriesPageData>> {
 
 export function getBatteryDetail(batteryId: string): Promise<Loaded<BatteryDetailView>> {
   return load(async () => normaliseBatteryDetail(await fetchBattery(batteryId)));
+}
+
+export interface VehiclesPageData {
+  rows: VehicleRow[];
+  summary: ApiVehicleFleetSummary | null;
+}
+
+export function getVehiclesPage(): Promise<Loaded<VehiclesPageData>> {
+  return load(async () => {
+    const [rows, summary] = await Promise.all([
+      fetchVehicles(),
+      fetchVehicleSummary().catch(() => null),
+    ]);
+    return { rows: rows.map(normaliseVehicle), summary };
+  });
+}
+
+export function getVehicleDetail(assetId: string): Promise<Loaded<VehicleDetailView>> {
+  return load(async () => normaliseVehicleDetail(await fetchVehicle(assetId)));
 }
 
 /** GET /operations/risk, every dock fleet-wide — carrying a location string
