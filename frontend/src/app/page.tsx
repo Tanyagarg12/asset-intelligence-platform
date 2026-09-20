@@ -1,4 +1,4 @@
-import { BatteryCharging, Bike, Plug, Warehouse } from "lucide-react";
+import { BatteryCharging, Plug, Warehouse } from "lucide-react";
 import { PageShell } from "@/components/layout/PageShell";
 import { Panel } from "@/components/ui/Panel";
 import { StatCard, type RiskItem } from "@/components/ui/StatCard";
@@ -80,7 +80,6 @@ export default async function DashboardPage({
     CHARGER: "charger",
     STATION: "station",
     DOCK: "dock",
-    VEHICLE: "vehicle",
   };
   const topRiskAssets: RankedAsset[] = topRiskRows.flatMap((row) => {
     const kind = KIND_BY_ASSET_TYPE[row.assetType.toUpperCase()];
@@ -108,26 +107,13 @@ export default async function DashboardPage({
     tag: row.priority,
   }));
 
-  // No dedicated top-at-risk-vehicles fetch yet — reuses the same
-  // cross-asset-type ranking the Top Risk Assets panel already fetched.
-  const vehicleItems: RiskItem[] = topRiskAssets
-    .filter((asset) => asset.kind === "vehicle")
-    .map((asset) => ({
-      id: asset.id,
-      key: asset.key,
-      href: asset.href,
-      detail: asset.issue,
-      risk: asset.risk,
-      tag: asset.tag,
-    }));
-
   return (
     <PageShell title="Dashboard" subtitle="Overview of Stations, Chargers & Batteries">
       <div className="flex flex-col gap-3">
         <DataSourceBadge source={data.source} />
         <CriticalAlertBanner rows={data.atRisk} />
 
-        <div className={`grid grid-cols-1 gap-3 md:grid-cols-2 ${data.vehicles ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
             icon={Warehouse}
             iconBg="color-mix(in srgb, var(--series-7) 12%, transparent)"
@@ -174,25 +160,6 @@ export default async function DashboardPage({
             items={batteryItems}
             emptyMessage="No battery above the Low risk band."
           />
-          {data.vehicles && (
-            <StatCard
-              icon={Bike}
-              iconBg="color-mix(in srgb, var(--series-2) 12%, transparent)"
-              iconColor="var(--series-2)"
-              label="Vehicles"
-              value={data.vehicles.total}
-              href="/vehicles"
-              breakdown={[
-                ...(data.vehicles.overallHealth != null
-                  ? [{ label: "Health", value: `${Math.round(data.vehicles.overallHealth)}/100`, tone: "good" as const }]
-                  : []),
-                { label: "High risk", value: data.vehicles.highRisk, tone: "warning" as const },
-                { label: "Predicted", value: data.vehicles.predictedFailures, tone: "critical" as const },
-              ]}
-              items={vehicleItems}
-              emptyMessage="No vehicle above the Low risk band."
-            />
-          )}
         </div>
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
